@@ -34,9 +34,11 @@ if (Test-Path -LiteralPath $StagingRoot) {
 New-Item -ItemType Directory -Path $StagingRoot | Out-Null
 
 Copy-Item -LiteralPath $ServerBundle -Destination (Join-Path $StagingRoot "creator-works-mcp.mjs")
+Copy-Item -LiteralPath $ServerBundle -Destination (Join-Path $StagingRoot "banter-mcp.mjs")
 $rootFiles = @(
     "setup.ps1",
     "setup.bat",
+    "setup.sh",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
@@ -48,6 +50,7 @@ foreach ($file in $rootFiles) {
 }
 Copy-Item -LiteralPath (Join-Path $RepoRoot "docs") -Destination (Join-Path $StagingRoot "docs") -Recurse
 Copy-Item -LiteralPath (Join-Path $RepoRoot "unity-extension") -Destination (Join-Path $StagingRoot "unity-extension") -Recurse
+Copy-Item -LiteralPath (Join-Path $RepoRoot "scripts\cli") -Destination (Join-Path $StagingRoot "scripts\cli") -Recurse
 
 if (Test-Path -LiteralPath $ArchivePath) {
     Remove-Item -LiteralPath $ArchivePath -Force

@@ -90,3 +90,33 @@ jobs:
         run: ./setup.sh help
       - name: Smoke-test setup.mjs install
         run: node scripts/cli/setup.mjs install
+
+  launcher-macos:
+    name: Tauri launcher (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.9.6 --locked
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher/src-tauri -> target
+      - run: npm ci
+      - run: npm run release:launcher
+      - run: cargo tauri build --bundles dmg
+      - run: npm run build:standalone
+      - run: cargo fmt --check
+        working-directory: launcher/src-tauri
+      - run: cargo test
+        working-directory: launcher/src-tauri
+      - name: Smoke-test setup.sh
+        run: ./setup.sh help
+      - name: Smoke-test setup.mjs install
+        run: node scripts/cli/setup.mjs install
+
