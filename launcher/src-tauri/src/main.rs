@@ -2625,11 +2625,17 @@ mod tests {
             "tool_groups": "all"
         }"#;
         let config: LauncherConfig = serde_json::from_str(legacy_json).unwrap();
-        assert!(config.allow_all_tests, "allow_all_tests should default to true for backwards compatibility");
+        assert!(
+            config.allow_all_tests,
+            "allow_all_tests should default to true for backwards compatibility"
+        );
 
         // Setting custom scripts writes launcher-settings.json
         set_unity_custom_scripts(project_path.clone(), true).unwrap();
-        let settings_path = root.join(".bantworks-mcp").join("state").join("launcher-settings.json");
+        let settings_path = root
+            .join(".bantworks-mcp")
+            .join("state")
+            .join("launcher-settings.json");
         let content = fs::read_to_string(&settings_path).unwrap();
         let val: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(val["enableCustomScripts"], true);
