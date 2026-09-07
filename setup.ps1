@@ -554,6 +554,7 @@ function Install-UnityExtension {
 
     $launcherSettings = @{
         enableCustomScripts = [bool]$config.enable_custom_scripts
+        allowAllTests = if ($null -ne $config.allow_all_tests) { [bool]$config.allow_all_tests } else { $true }
     } | ConvertTo-Json
     Write-AtomicText "$stateDir\launcher-settings.json" $launcherSettings
 

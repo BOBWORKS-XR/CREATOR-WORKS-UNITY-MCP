@@ -43,6 +43,8 @@ struct LauncherConfig {
     auto_start: bool,
     #[serde(default)]
     enable_custom_scripts: bool,
+    #[serde(default = "default_allow_all_tests")]
+    allow_all_tests: bool,
     #[serde(default = "default_tool_groups")]
     tool_groups: String,
 }
@@ -138,6 +140,10 @@ struct SetupResult {
     antigravity_configured: bool,
     opencode_configured: bool,
     runtime_command: String,
+}
+
+fn default_allow_all_tests() -> bool {
+    true
 }
 
 fn default_tool_groups() -> String {
@@ -680,6 +686,7 @@ fn load_config(app: tauri::AppHandle) -> Result<LauncherConfig, String> {
             mcp_server_path: default_mcp_server_path(&app)?.to_string_lossy().to_string(),
             auto_start: false,
             enable_custom_scripts: false,
+            allow_all_tests: true,
             tool_groups: default_tool_groups(),
         })
     }
@@ -1982,10 +1989,12 @@ fn one_click_setup(
     config.auto_start = true;
     config.enable_custom_scripts = enable_custom_scripts;
     config.tool_groups = tool_groups.clone();
+    let allow_all_tests = config.allow_all_tests;
     save_config(config)?;
 
     install_unity_extension(app.clone(), channel.unity_project_path.clone())?;
     set_unity_custom_scripts(channel.unity_project_path.clone(), enable_custom_scripts)?;
+    set_unity_allow_all_tests(channel.unity_project_path.clone(), allow_all_tests)?;
 
     if configure_codex {
         update_codex_mcp_config(
@@ -2072,6 +2081,7 @@ fn main() {
             update_configured_unity_extensions,
             get_mcp_root,
             set_unity_custom_scripts,
+            set_unity_allow_all_tests,
             get_onboarding_status,
             one_click_setup,
         ])
@@ -2079,11 +2089,11 @@ fn main() {
         .expect("error while running tauri application");
 }
 
-/// Set the custom scripts preference in Unity project's MCP state
-/// This writes to the project runtime state folder which the Unity extension reads
-#[tauri::command]
-fn set_unity_custom_scripts(unity_project_path: String, enabled: bool) -> Result<(), String> {
-    let state_dir = PathBuf::from(&unity_project_path)
+fn update_unity_launcher_settings<F>(unity_project_path: &str, update: F) -> Result<(), String>
+where
+    F: FnOnce(&mut serde_json::Value),
+{
+    let state_dir = PathBuf::from(unity_project_path)
         .join(".bantworks-mcp")
         .join("state");
 
@@ -2092,9 +2102,14 @@ fn set_unity_custom_scripts(unity_project_path: String, enabled: bool) -> Result
 
     let settings_path = state_dir.join("launcher-settings.json");
 
-    let settings = serde_json::json!({
-        "enableCustomScripts": enabled
-    });
+    let mut settings: serde_json::Value = if settings_path.exists() {
+        let content = fs::read_to_string(&settings_path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    update(&mut settings);
 
     let content = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
@@ -2102,6 +2117,24 @@ fn set_unity_custom_scripts(unity_project_path: String, enabled: bool) -> Result
     atomic_write(&settings_path, &content)?;
 
     Ok(())
+}
+
+/// Set the custom scripts preference in Unity project's MCP state
+/// This writes to the project runtime state folder which the Unity extension reads
+#[tauri::command]
+fn set_unity_custom_scripts(unity_project_path: String, enabled: bool) -> Result<(), String> {
+    update_unity_launcher_settings(&unity_project_path, |settings| {
+        settings["enableCustomScripts"] = serde_json::json!(enabled);
+    })
+}
+
+/// Set the allow all tests preference in Unity project's MCP state
+/// This writes to the project runtime state folder which the Unity extension reads
+#[tauri::command]
+fn set_unity_allow_all_tests(unity_project_path: String, enabled: bool) -> Result<(), String> {
+    update_unity_launcher_settings(&unity_project_path, |settings| {
+        settings["allowAllTests"] = serde_json::json!(enabled);
+    })
 }
 
 #[cfg(test)]
@@ -2159,6 +2192,7 @@ mod tests {
             mcp_server_path: "D:/installed/server/banter-mcp.mjs".to_string(),
             auto_start: true,
             enable_custom_scripts: false,
+            allow_all_tests: true,
             tool_groups: " ShaderGraph, Read, read ".to_string(),
         };
         let replacement = Path::new("D:/installed/server/creator-works-mcp.mjs");
@@ -2574,5 +2608,39 @@ mod tests {
             .is_file());
 
         let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn launcher_settings_updates_preserve_fields_and_defaults() {
+        let root = temporary_root();
+        let project_path = root.to_string_lossy().to_string();
+
+        // Deserializing older config without allow_all_tests defaults to true
+        let legacy_json = r#"{
+            "channels": [],
+            "active_channel_id": null,
+            "mcp_server_path": "",
+            "auto_start": false,
+            "enable_custom_scripts": true,
+            "tool_groups": "all"
+        }"#;
+        let config: LauncherConfig = serde_json::from_str(legacy_json).unwrap();
+        assert!(config.allow_all_tests, "allow_all_tests should default to true for backwards compatibility");
+
+        // Setting custom scripts writes launcher-settings.json
+        set_unity_custom_scripts(project_path.clone(), true).unwrap();
+        let settings_path = root.join(".bantworks-mcp").join("state").join("launcher-settings.json");
+        let content = fs::read_to_string(&settings_path).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(val["enableCustomScripts"], true);
+
+        // Setting allow_all_tests preserves enableCustomScripts
+        set_unity_allow_all_tests(project_path.clone(), false).unwrap();
+        let content = fs::read_to_string(&settings_path).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(val["enableCustomScripts"], true);
+        assert_eq!(val["allowAllTests"], false);
+
+        let _ = fs::remove_dir_all(root);
     }
 }
