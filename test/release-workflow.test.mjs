@@ -43,6 +43,26 @@ test("release publishes one guided Windows installer path", () => {
   assert.doesNotMatch(releaseWorkflow, /\.Extension -in[^\r\n]*\.msi/i);
 });
 
+test("release publishes Linux AppImage, DEB, and RPM bundles", () => {
+  assert.match(releaseWorkflow, /name:\s*Linux AppImage, DEB, and RPM bundle/);
+  assert.match(releaseWorkflow, /runs-on:\s*ubuntu-22\.04/);
+  assert.match(releaseWorkflow, /NO_STRIP:\s*1/);
+  assert.match(releaseWorkflow, /args:\s*"--bundles appimage,deb,rpm"/);
+});
+
+test("release publishes macOS DMG bundle", () => {
+  assert.match(releaseWorkflow, /name:\s*macOS DMG bundle/);
+  assert.match(releaseWorkflow, /runs-on:\s*macos-latest/);
+  assert.match(releaseWorkflow, /args:\s*"--bundles dmg"/);
+});
+
+test("release consolidates multi-platform checksums across all artifacts", () => {
+  assert.match(releaseWorkflow, /needs:\s*\[windows,\s*linux,\s*macos\]/);
+  assert.match(releaseWorkflow, /select\(\.name != "SHA256SUMS\.txt"\)/);
+  assert.match(releaseWorkflow, /gh release upload "\${{ github\.ref_name }}" SHA256SUMS\.txt/);
+});
+
+
 test("NSIS setup guards the bundled runtime without force-closing clients", () => {
   assert.match(
     tauriConfig,
