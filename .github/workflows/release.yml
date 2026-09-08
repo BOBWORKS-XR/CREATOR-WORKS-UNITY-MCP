@@ -195,7 +195,8 @@ jobs:
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
 
-          gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq '.assets[] | "\(.id) \(.name)"' | while read -r asset_id asset_name; do
+          # The REST by-tag endpoint cannot resolve a draft; gh release view can.
+          gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" --json assets --jq '.assets[] | "\(.apiUrl) \(.name)"' | while read -r asset_api_url asset_name; do
             label=""
             case "$asset_name" in
               *.exe)
@@ -218,7 +219,7 @@ jobs:
                 ;;
             esac
             if [ -n "$label" ]; then
-              gh api -X PATCH "repos/${{ github.repository }}/releases/assets/$asset_id" -f label="$label" >/dev/null 2>&1 || true
+              gh api -X PATCH "$asset_api_url" -f label="$label" >/dev/null
             fi
           done
 

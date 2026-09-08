@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Release asset labels now resolve draft assets through `gh release view` and their returned API URLs. The REST by-tag endpoint returned 404 during the 2.6.0-rc.1 draft-label step after all packages and consolidated checksums had uploaded. This automation-only follow-up does not change the tagged application binaries.
+
 ## 2.6.0-rc.1 - 2026-09-08
 
 Prerelease. See [release notes](docs/releases/2.6.0-rc.1.md) for upgrade steps,

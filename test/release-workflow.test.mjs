@@ -63,6 +63,14 @@ test("release consolidates multi-platform checksums across all artifacts", () =>
 });
 
 
+test("release labels resolve draft-safe asset URLs", () => {
+  assert.match(releaseWorkflow, /gh release view .*--json assets --jq.*apiUrl/);
+  assert.match(releaseWorkflow, /while read -r asset_api_url asset_name/);
+  assert.match(releaseWorkflow, /gh api -X PATCH "\$asset_api_url"/);
+  assert.doesNotMatch(releaseWorkflow, /releases\/tags\//);
+  assert.doesNotMatch(releaseWorkflow, /-f label=.*\|\| true/);
+});
+
 test("NSIS setup guards the bundled runtime without force-closing clients", () => {
   assert.match(
     tauriConfig,
