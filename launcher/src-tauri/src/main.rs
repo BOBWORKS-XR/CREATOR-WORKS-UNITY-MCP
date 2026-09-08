@@ -2106,12 +2106,19 @@ where
     let settings_path = state_dir.join("launcher-settings.json");
 
     let mut settings: serde_json::Value = if settings_path.exists() {
-        let content = fs::read_to_string(&settings_path).unwrap_or_default();
-        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+        let content = fs::read_to_string(&settings_path)
+            .map_err(|e| format!("Failed to read launcher settings: {}", e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Invalid launcher settings; preserving existing file: {}", e))?
     } else {
         serde_json::json!({})
     };
 
+    if !settings.is_object() {
+        return Err(
+            "Launcher settings must be a JSON object; preserving existing file".to_string(),
+        );
+    }
     update(&mut settings);
 
     let content = serde_json::to_string_pretty(&settings)
@@ -2650,6 +2657,12 @@ mod tests {
         let val: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(val["enableCustomScripts"], true);
         assert_eq!(val["allowAllTests"], false);
+
+        for invalid in ["{broken", "[]", "null"] {
+            fs::write(&settings_path, invalid).unwrap();
+            assert!(set_unity_allow_all_tests(project_path.clone(), true).is_err());
+            assert_eq!(fs::read_to_string(&settings_path).unwrap(), invalid);
+        }
 
         let _ = fs::remove_dir_all(root);
     }

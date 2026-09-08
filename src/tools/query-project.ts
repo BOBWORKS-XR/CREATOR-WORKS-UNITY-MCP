@@ -248,6 +248,8 @@ function isTargetedHierarchyQuery(
     normalizeObjectPath(options.rootPath) ||
     options.componentType ||
     options.propertyNames?.length ||
+    options.componentDetails === "identity" ||
+    (options.fields?.length && !options.fields.includes("components") && !options.fields.includes("properties")) ||
     filter
   );
 }

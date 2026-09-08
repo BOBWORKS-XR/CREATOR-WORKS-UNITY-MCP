@@ -554,11 +554,17 @@ function Install-UnityExtension {
         New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
     }
 
-    $launcherSettings = @{
-        enableCustomScripts = [bool]$config.enable_custom_scripts
-        allowAllTests = if ($null -ne $config.allow_all_tests) { [bool]$config.allow_all_tests } else { $true }
-    } | ConvertTo-Json
-    Write-AtomicText "$stateDir\launcher-settings.json" $launcherSettings
+    $settingsPath = Join-Path $stateDir "launcher-settings.json"
+    $launcherSettings = if (Test-Path -LiteralPath $settingsPath) {
+        Get-Content -LiteralPath $settingsPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } else { [pscustomobject]@{} }
+    if ($launcherSettings -isnot [pscustomobject]) {
+        throw "launcher-settings.json must contain an object; existing settings were not replaced."
+    }
+    $launcherSettings | Add-Member -NotePropertyName enableCustomScripts -NotePropertyValue ([bool]$config.enable_custom_scripts) -Force
+    $allowAllTests = if ($null -ne $config.allow_all_tests) { [bool]$config.allow_all_tests } else { $true }
+    $launcherSettings | Add-Member -NotePropertyName allowAllTests -NotePropertyValue $allowAllTests -Force
+    Write-AtomicText $settingsPath ($launcherSettings | ConvertTo-Json -Depth 20)
 
     Write-Host ""
     Write-Host "Unity extension installed!" -ForegroundColor Green

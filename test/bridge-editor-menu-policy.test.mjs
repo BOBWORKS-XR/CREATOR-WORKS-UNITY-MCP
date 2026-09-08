@@ -56,7 +56,7 @@ test("targeted hierarchy queries are correlated and avoid full-state export", ()
 });
 
 test("hierarchy text filters inspect identity fields without serializing properties", () => {
-  assert.match(bridge, /Live hierarchy queries require rootPath, filter, componentType, or propertyNames/);
+  assert.match(bridge, /Live hierarchy queries require rootPath, filter, componentType, propertyNames, or an identity-only projection/);
   assert.match(bridge, /IdentityTextMatches\(gameObject\.name, filter, match\)/);
   assert.match(bridge, /IdentityTextMatches\(component\.GetType\(\)\.FullName, filter, match\)/);
   assert.doesNotMatch(bridge, /JsonUtility\.ToJson\(info\)\.IndexOf\(filter/);

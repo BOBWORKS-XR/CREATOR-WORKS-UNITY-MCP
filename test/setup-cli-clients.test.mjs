@@ -18,8 +18,42 @@ import {
   configPathFor,
   loadConfig,
   normalizeToolGroups,
+  saveConfig,
+  installUnityExtension,
 } from "../scripts/cli/setup-lib.mjs";
 import { parseJsonc } from "../scripts/cli/jsonc-edit.mjs";
+
+test("CLI round trips restricted test policy and preserves other project settings", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "creator-policy-"));
+  try {
+    const context = { configRoot: path.join(root, "config"), mcpRoot: path.join(root, "source") };
+    const sourceEditor = path.join(context.mcpRoot, "unity-extension", "Editor");
+    mkdirSync(sourceEditor, { recursive: true });
+    writeFileSync(path.join(context.mcpRoot, "creator-works-mcp.mjs"), "// fixture");
+    writeFileSync(path.join(sourceEditor, "BanterMCPBridge.cs"), "// fixture");
+    const project = path.join(root, "Project");
+    const state = path.join(project, ".bantworks-mcp", "state");
+    mkdirSync(state, { recursive: true });
+    const settingsPath = path.join(state, "launcher-settings.json");
+    writeFileSync(settingsPath, JSON.stringify({ retainThis: "value" }));
+    const config = loadConfig(context);
+    assert.equal(config.allow_all_tests, true);
+    config.allow_all_tests = false;
+    config.channels = [{ id: "fixture", unity_project_path: project }];
+    config.active_channel_id = "fixture";
+    saveConfig(context, config);
+    assert.equal(loadConfig(context).allow_all_tests, false);
+    installUnityExtension(context);
+    const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    assert.equal(settings.allowAllTests, false);
+    assert.equal(settings.retainThis, "value");
+    writeFileSync(settingsPath, "[broken");
+    assert.throws(() => installUnityExtension(context));
+    assert.equal(readFileSync(settingsPath, "utf8"), "[broken");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("cross-platform setup defaults new configurations to the core tool profile", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "creator-works-cli-default-"));

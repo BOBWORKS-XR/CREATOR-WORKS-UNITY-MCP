@@ -109,14 +109,26 @@ function setupEventListeners() {
   });
 
   elements.allowAllTests.addEventListener('change', async function() {
-    config.allow_all_tests = elements.allowAllTests.checked;
-    await saveLauncherConfig('Failed to save test policy preference');
+    const previous = config.allow_all_tests !== false;
     const channel = getActiveChannel();
-    if (channel) {
-      await window.__TAURI__.core.invoke('set_unity_allow_all_tests', {
-        unityProjectPath: channel.unity_project_path,
-        enabled: config.allow_all_tests
-      });
+    config.allow_all_tests = elements.allowAllTests.checked;
+    elements.allowAllTests.disabled = true;
+    try {
+      if (!await saveLauncherConfig('Failed to save test policy preference')) {
+        config.allow_all_tests = previous;
+        elements.allowAllTests.checked = previous;
+        return;
+      }
+      if (channel) {
+        await window.__TAURI__.core.invoke('set_unity_allow_all_tests', {
+          unityProjectPath: channel.unity_project_path,
+          enabled: config.allow_all_tests
+        });
+      }
+    } catch (error) {
+      showToast('Preference saved, but the selected project test policy was not updated: ' + String(error), 'error');
+    } finally {
+      elements.allowAllTests.disabled = false;
     }
   });
 
@@ -657,8 +669,10 @@ async function installExtension() {
 async function saveLauncherConfig(errorMessage) {
   try {
     await window.__TAURI__.core.invoke('save_config', { config: config });
+    return true;
   } catch (error) {
     showToast(errorMessage + ': ' + String(error), 'error');
+    return false;
   }
 }
 

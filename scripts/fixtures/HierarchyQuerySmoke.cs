@@ -40,10 +40,15 @@ namespace BantworksMCPFixture
         {
             public string name;
             public string path;
+            public ComponentItem[] components;
+        }
+
+        [Serializable]
+        private sealed class ComponentItem
+        {
             public string objectPath;
             public string type;
             public Property[] properties;
-            public Item[] components;
             public string[] missingProperties;
         }
 
@@ -54,7 +59,7 @@ namespace BantworksMCPFixture
             public bool success;
             public string error;
             public Item[] objects;
-            public Item[] components;
+            public ComponentItem[] components;
             public int totalMatches;
             public int returned;
             public bool truncated;
@@ -128,7 +133,56 @@ namespace BantworksMCPFixture
                 "Identity-only hierarchy results still serialized properties");
             var noComponents = Execute(new Query { rootPath = "RendererProbe", includeComponents = false });
             Check(noComponents.objects.Single().components.Length == 0, "Transform-only query still serialized components");
+            var inventory = Execute(new Query { queryKind = "components", includeComponentProperties = false });
+            Check(inventory.components.All(c => c.properties.Length == 0), "Unfiltered identity inventory serialized properties");
+            CheckTestPolicy();
             Debug.Log("[CREATOR WORKS FIXTURE] Live hierarchy query smoke passed");
+        }
+
+        private static void CheckTestPolicy()
+        {
+            Type bridge = typeof(BantworksMCP.BantworksMCPBridge);
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
+            string key = (string)bridge.GetField("AllowAllTestsKey", flags).GetValue(null);
+            Check(key.Length > "BantworksMCP_AllowAllTests_".Length, "Test policy is not project-scoped");
+            Type settingsType = bridge.GetNestedType("LauncherSettings", BindingFlags.NonPublic);
+            object legacy = JsonUtility.FromJson("{}", settingsType);
+            Check((bool)settingsType.GetField("allowAllTests").GetValue(legacy), "Legacy settings must preserve the permissive default");
+            string state = Path.Combine(Directory.GetParent(Application.dataPath).FullName, ".bantworks-mcp", "state");
+            bool original = BantworksMCP.BantworksMCPBridge.AllowAllTests;
+            try
+            {
+                Directory.CreateDirectory(state);
+                string custom = BantworksMCP.BantworksMCPBridge.EnableCustomScripts ? "true" : "false";
+                File.WriteAllText(Path.Combine(state, "launcher-settings.json"),
+                    "{\"enableCustomScripts\":" + custom + ",\"allowAllTests\":true}");
+                MethodInfo load = bridge.GetMethod("LoadLauncherSettingsIfChanged", flags);
+                load.Invoke(null, null);
+                BantworksMCP.BantworksMCPBridge.AllowAllTests = false;
+                bridge.GetField("lastLauncherSettingsWriteTime", flags).SetValue(null, DateTime.MinValue);
+                load.Invoke(null, null);
+                Check(!BantworksMCP.BantworksMCPBridge.AllowAllTests, "Domain reload reset a project-local test policy");
+                MethodInfo validate = bridge.GetMethod("EnsureTestRunAllowed", flags);
+                bool blocked = false;
+                string failure = "No exception";
+                var empty = new string[0];
+                try { validate.Invoke(null, new object[] { empty, empty, empty, empty }); }
+                catch (TargetInvocationException exception)
+                {
+                    failure = exception.InnerException.Message;
+                    blocked = failure.Contains("Running all tests without a filter is disabled");
+                }
+                Check(blocked, "Restricted test policy did not reject the unfiltered run: " + failure);
+                validate.Invoke(null, new object[] { new[] { "Targeted.Test" }, empty, empty, empty });
+                BantworksMCP.BantworksMCPBridge.AllowAllTests = true;
+                validate.Invoke(null, new object[] { empty, empty, empty, empty });
+            }
+            finally
+            {
+                BantworksMCP.BantworksMCPBridge.AllowAllTests = original;
+                UnityEditor.EditorPrefs.DeleteKey(key);
+                UnityEditor.EditorPrefs.DeleteKey(key + "_source");
+            }
         }
 
         private static Result Execute(Query command)

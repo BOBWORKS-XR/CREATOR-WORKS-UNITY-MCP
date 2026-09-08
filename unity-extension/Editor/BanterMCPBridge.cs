@@ -48,7 +48,7 @@ namespace BantworksMCP
         private static readonly string EditorMenuResultsFolder = Path.Combine(StateFolder, "editor-menu-results");
         private static readonly string HierarchyQueryResultsFolder = Path.Combine(StateFolder, "hierarchy-query-results");
         private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
-        private const string BridgeVersion = "2.5.1";
+        private const string BridgeVersion = "2.6.0-rc.1";
         private const int BridgeProtocolVersion = 1;
         private const int MinimumBridgeProtocolVersion = 1;
         private const int MaximumPipeCommandCharacters = 4 * 1024 * 1024;
@@ -110,7 +110,7 @@ namespace BantworksMCP
         }
 
         // Test runner policy - controls whether unfiltered full test suite sweeps are allowed
-        private static readonly string AllowAllTestsKey = "BantworksMCP_AllowAllTests";
+        private static readonly string AllowAllTestsKey = "BantworksMCP_AllowAllTests_" + ComputeSha256(Encoding.UTF8.GetBytes(ProjectRoot));
         public static bool AllowAllTests
         {
             get => EditorPrefs.GetBool(AllowAllTestsKey, true);
@@ -332,9 +332,12 @@ namespace BantworksMCP
                         Debug.Log($"[Creator Works MCP] Custom scripts {(settings.enableCustomScripts ? "enabled" : "disabled")} from launcher settings");
                     }
 
-                    if (AllowAllTests != settings.allowAllTests)
+                    // A Unity-window override survives reload until the launcher settings actually change.
+                    string policyRevision = writeTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture);
+                    if (EditorPrefs.GetString(AllowAllTestsKey + "_source", "") != policyRevision)
                     {
                         AllowAllTests = settings.allowAllTests;
+                        EditorPrefs.SetString(AllowAllTestsKey + "_source", policyRevision);
                         LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Launcher test policy applied";
                         Debug.Log($"[Creator Works MCP] Unfiltered test runs {(settings.allowAllTests ? "allowed" : "blocked")} from launcher settings");
                     }
@@ -1686,9 +1689,10 @@ namespace BantworksMCP
                 if (string.IsNullOrWhiteSpace(cmd.rootPath) &&
                     string.IsNullOrWhiteSpace(cmd.componentType) &&
                     string.IsNullOrWhiteSpace(cmd.filter) &&
-                    (cmd.propertyNames == null || cmd.propertyNames.Length == 0))
+                    (cmd.propertyNames == null || cmd.propertyNames.Length == 0) &&
+                    cmd.includeComponents && cmd.includeComponentProperties)
                 {
-                    throw new InvalidOperationException("Live hierarchy queries require rootPath, filter, componentType, or propertyNames");
+                    throw new InvalidOperationException("Live hierarchy queries require rootPath, filter, componentType, propertyNames, or an identity-only projection");
                 }
 
                 var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
@@ -2226,16 +2230,7 @@ namespace BantworksMCP
                 tests = new List<UnityTestCaseResult>()
             };
 
-            if (!AllowAllTests &&
-                run.testNames.Length == 0 &&
-                run.groupNames.Length == 0 &&
-                run.categoryNames.Length == 0 &&
-                run.assemblyNames.Length == 0)
-            {
-                throw new InvalidOperationException(
-                    "Running all tests without a filter is disabled for this project in Creator Works MCP settings. " +
-                    "Specify targeted testNames, groupNames, or assembly filters, or enable 'Allow Running All Tests' in the MCP settings window.");
-            }
+            EnsureTestRunAllowed(run.testNames, run.groupNames, run.categoryNames, run.assemblyNames);
 
             SaveTestRunResult(run);
 
@@ -5889,6 +5884,15 @@ namespace BantworksMCP
                 }
             }
             return info;
+        }
+
+        private static void EnsureTestRunAllowed(string[] testNames, string[] groupNames, string[] categoryNames, string[] assemblyNames)
+        {
+            if (!AllowAllTests && testNames.Length == 0 && groupNames.Length == 0 &&
+                categoryNames.Length == 0 && assemblyNames.Length == 0)
+                throw new InvalidOperationException(
+                    "Running all tests without a filter is disabled for this project in Creator Works MCP settings. " +
+                    "Specify targeted testNames, groupNames, or assembly filters, or enable 'Allow Running All Tests' in the MCP settings window.");
         }
 
         private static ComponentInfo SerializeComponent(Component comp, string[] includedPropertyNames = null, bool includeProperties = true)

@@ -31,9 +31,9 @@ test("release metadata states the enforced standalone Node requirement", () => {
   assert.doesNotMatch(releaseWorkflow, /Node\.js 18\+/);
 });
 
-test("tag builds create a stable draft for final asset inspection", () => {
+test("tag builds stay draft and mark prerelease versions correctly", () => {
   assert.match(releaseWorkflow, /releaseDraft: true/);
-  assert.match(releaseWorkflow, /prerelease: false/);
+  assert.equal((releaseWorkflow.match(/prerelease: \$\{\{ contains\(github.ref_name, '-'\) \}\}/g) || []).length, 3);
 });
 
 test("release publishes one guided Windows installer path", () => {
@@ -58,7 +58,7 @@ test("release publishes macOS DMG bundle", () => {
 
 test("release consolidates multi-platform checksums across all artifacts", () => {
   assert.match(releaseWorkflow, /needs:\s*\[windows,\s*linux,\s*macos\]/);
-  assert.match(releaseWorkflow, /select\(\.name != "SHA256SUMS\.txt"\)/);
+  assert.match(releaseWorkflow, /node scripts\/release-checksums.mjs release-assets.json > SHA256SUMS.txt/);
   assert.match(releaseWorkflow, /gh release upload "\${{ github\.ref_name }}" SHA256SUMS\.txt/);
 });
 

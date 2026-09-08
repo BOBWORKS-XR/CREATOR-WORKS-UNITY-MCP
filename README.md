@@ -4,6 +4,10 @@ Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other 
 
 [Download Creator Works MCP 2.5.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1) | [Source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
 
+This branch prepares **2.6.0-rc.1**, not yet published. The links above still
+point to the current stable release. See the [candidate notes](docs/releases/2.6.0-rc.1.md)
+for token-efficiency changes, contributor work, and acceptance limits.
+
 ![Creator Works MCP configured Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
 
 *The launcher shows the private runtime, connected MCP clients, active Unity project, detected Creator SDK/Banter SDK/Unity-only profiles, and each project's bridge status. Amber **Update available** labels mean the project-local bridge should be refreshed; they are not SDK compile or runtime results.*
@@ -73,12 +77,12 @@ Targeted hierarchy queries serialize only the requested subtree or matching comp
 
 ## Token Use
 
-This section describes the unreleased token-optimization source branch, not the
-published 2.5.1 installer. Installation and large-project acceptance are pending.
+This section describes the 2.6.0 release candidate, not the published 2.5.1
+installer. Source tests do not replace real-project and installer acceptance.
 
 New launcher and setup configurations default to the `core` profile. It exposes
 24 general inspection and scene-authoring tools instead of all 52 schemas.
-Current source measurement is 21,425 schema bytes for `core` versus 46,866 for
+Current source measurement is 21,827 schema bytes for `core` versus 47,268 for
 `all`, a 54% reduction before the user's prompt or any tool result is counted.
 Actual tokens vary by MCP client and model; run `npm run measure:context` for the
 current byte counts, on-demand resource sizes, and rough estimates.
@@ -89,6 +93,11 @@ The previous default was 512 KiB for item data alone. A caller can explicitly re
 actually required. Asset and prefab discovery use their dedicated bounded tools.
 Filtering and field projection happen before limiting the returned items. An
 oversized individual item reports truncation and suggests a narrower projection.
+Use `componentDetails: "identity"` to inventory components without serialized
+properties. Requested properties that are not returned appear in
+`missingProperties`; they must not be interpreted as false values. Fresh targeted
+reads support hidden/nested serialized paths and renderer enabled/material state.
+Query budgets accept 16,384 through 4,194,304 bytes; this is a ceiling, not padding.
 Hierarchy text filters search only object and component identity fields; hidden
 serialized property values cannot create unexplained matches. Filtered live
 reads use the correlated targeted-query path rather than a full-state export.
@@ -116,6 +125,10 @@ Existing saved `all` selections are preserved. Changing the profile updates
 client configuration, so restart an already-running MCP client afterward. A
 server started manually without `CREATOR_WORKS_TOOL_GROUPS` still exposes `all`
 for backward compatibility.
+
+Compile waits tolerate domain reload until their deadline and require a fresh,
+settled Editor before confirming readiness. A command timeout is not cancellation:
+follow its project-bound polling instructions instead of submitting it again.
 
 ## MCP Clients
 

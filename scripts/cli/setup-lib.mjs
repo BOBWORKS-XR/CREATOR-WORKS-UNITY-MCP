@@ -196,6 +196,7 @@ export function loadConfig({ configRoot, mcpRoot }) {
       tool_groups: normalizeToolGroups(raw.tool_groups),
       auto_start: Boolean(raw.auto_start),
       enable_custom_scripts: Boolean(raw.enable_custom_scripts),
+      allow_all_tests: raw.allow_all_tests !== false,
     };
     if (sourcePath === legacyConfigPath) {
       atomicWriteText(configPath, `${JSON.stringify(normalized, null, 2)}\n`);
@@ -209,6 +210,7 @@ export function loadConfig({ configRoot, mcpRoot }) {
     tool_groups: "core",
     auto_start: false,
     enable_custom_scripts: false,
+    allow_all_tests: true,
   };
 }
 
@@ -225,6 +227,7 @@ export function saveConfig({ configRoot, mcpRoot }, config) {
     tool_groups: normalizeToolGroups(config.tool_groups),
     auto_start: Boolean(config.auto_start),
     enable_custom_scripts: Boolean(config.enable_custom_scripts),
+    allow_all_tests: config.allow_all_tests !== false,
   };
   atomicWriteText(configPath, `${JSON.stringify(sanitized, null, 2)}\n`);
 }
@@ -500,9 +503,15 @@ export function installUnityExtension({ configRoot, mcpRoot }) {
   atomicCopyFile(sourcePath, destination);
   const stateDir = path.join(channel.unity_project_path, ".bantworks-mcp", "state");
   mkdirSync(stateDir, { recursive: true });
+  const settingsPath = path.join(stateDir, "launcher-settings.json");
+  const settings = existsSync(settingsPath) ? JSON.parse(readFileSync(settingsPath, "utf8")) : {};
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    throw new Error("launcher-settings.json must contain an object; existing settings were not replaced.");
+  }
   atomicWriteText(
-    path.join(stateDir, "launcher-settings.json"),
+    settingsPath,
     `${JSON.stringify({
+      ...settings,
       enableCustomScripts: Boolean(config.enable_custom_scripts),
       allowAllTests: config.allow_all_tests !== false,
     }, null, 2)}\n`,
