@@ -101,7 +101,7 @@ The build runs the standalone server bundle and smoke test, downloads the pinned
 
 Run `cargo fmt --check` and `cargo test` in `launcher/src-tauri` before creating a release build. Building the launcher does not update an already installed copy under `%LOCALAPPDATA%` / `~/.local/share`; distribute or install the newly built artifact deliberately.
 
-Version tags matching `v<package version>` run the current Windows release workflow. It creates a draft NSIS installer, standalone Node 20+ ZIP, and `SHA256SUMS.txt`; MSI, Linux, and macOS bundles are local-build capabilities and are not currently published by that workflow. Version metadata must agree across `package.json`, the MCP handshake, Cargo, and Tauri configuration; verify it with `npm run check:version`.
+Version tags matching `v<package version>` run the multi-platform release workflow. It creates a draft release containing the Windows NSIS installer, Linux `.AppImage`, `.deb`, and `.rpm` bundles, macOS `.dmg` bundle, standalone Node 20+ ZIP, and a consolidated `SHA256SUMS.txt`. Version metadata must agree across `package.json`, the MCP handshake, Cargo, and Tauri configuration; verify it with `npm run check:version`.
 
 ## Code Signing
 
