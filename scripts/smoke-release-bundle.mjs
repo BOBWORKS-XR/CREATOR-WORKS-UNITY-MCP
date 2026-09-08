@@ -90,12 +90,25 @@ try {
     method: "notifications/initialized",
   })}\n`);
   const tools = await request({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-  assert.equal(tools.result?.tools?.length, 50);
+  assert.equal(tools.result?.tools?.length, 52);
   assert.ok(tools.result.tools.some((tool) => tool.name === "validate_vs_graph_in_unity"));
   assert.ok(tools.result.tools.some((tool) => tool.name === "validate_banter_visual_scripting"));
+  assert.ok(tools.result.tools.some((tool) => tool.name === "search_sidequest_vs_nodes"));
   assert.ok(tools.result.tools.some((tool) => tool.name === "get_unity_command_status"));
   assert.ok(tools.result.tools.some((tool) => tool.name === "wait_for_unity_compile"));
   assert.ok(tools.result.tools.some((tool) => tool.name === "execute_editor_menu_item"));
+  const reference = await request({ jsonrpc: "2.0", id: 3, method: "tools/call", params: {
+    name: "get_mcp_reference", arguments: { source: "manual", query: "SetMember", limit: 1 },
+  } });
+  const referenceText = reference.result?.content?.[0]?.text;
+  assert.ok(referenceText, JSON.stringify(reference));
+  const excerpt = JSON.parse(referenceText);
+  assert.equal(excerpt.success, true);
+  assert.equal(excerpt.returned, 1);
+  assert.ok(excerpt.guidance.length > 0);
+  assert.ok(Buffer.byteLength(referenceText) <= 16384);
+  const prompt = await request({ jsonrpc: "2.0", id: 4, method: "prompts/get", params: { name: "create_vs_graph", arguments: {} } });
+  assert.match(JSON.stringify(prompt.result), /get_mcp_reference/);
 
   console.log(`Standalone MCP bundle smoke test passed (${statSync(sourceBundle).size} bytes)`);
 } finally {

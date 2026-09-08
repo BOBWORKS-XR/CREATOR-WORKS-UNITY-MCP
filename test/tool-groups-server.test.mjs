@@ -82,6 +82,34 @@ test("stdio tools/list honors CREATOR_WORKS_TOOL_GROUPS", async () => {
   }
 });
 
+test("stdio token-saver profile exposes only the compact general surface", async () => {
+  const server = await startServer("core");
+  try {
+    await server.request({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "token-saver-test", version: "1.0.0" },
+      },
+    });
+    server.child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+    const response = await server.request({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    const names = new Set(response.result.tools.map((tool) => tool.name));
+
+    assert.equal(names.size, 24);
+    assert.ok(names.has("query_project_state"));
+    assert.ok(names.has("create_gameobject"));
+    assert.ok(!names.has("search_sidequest_vs_nodes"));
+    assert.ok(!names.has("generate_vs_graph"));
+    assert.match(server.stderr(), /tool groups: core/);
+  } finally {
+    await server.stop();
+  }
+});
+
 test("legacy BANTWORKS_TOOL_GROUPS remains an upgrade fallback", async () => {
   const server = await startServer("none", "BANTWORKS_TOOL_GROUPS");
   try {

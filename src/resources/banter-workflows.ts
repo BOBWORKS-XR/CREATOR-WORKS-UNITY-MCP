@@ -417,8 +417,10 @@ export function renderBanterWorkflowPrompt(id: BanterWorkflowId, goal?: string):
 
   return `Execute the Creator Works MCP ${workflow.title} workflow in the selected Unity project.
 ${goalLine}
-Read banter://workflows and use the '${id}' contract. Also read the evidence
-resources named by that contract. Run get_bridge_status, get_banter_sdk_info,
+Use get_mcp_reference with source workflows and entryId ${id} for the '${id}' contract.
+Retrieve only its relevant component or JavaScript entries with get_mcp_reference,
+and custom node definitions with search_sidequest_vs_nodes. Follow continuation
+offsets when an entry is partial. Run get_bridge_status, get_banter_sdk_info,
 and query_project_state before changing anything.
 
 Use the sdkProfile and namespaces returned by get_banter_sdk_info. Catalogue

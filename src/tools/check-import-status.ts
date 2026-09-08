@@ -268,8 +268,9 @@ export async function waitForUnityCompile(
   let settledSince: number | undefined;
   while (Date.now() - startedAt < timeoutMs) {
     const current = readCurrentEditorAndCompilationState(config);
-    if (current.stale) {
-      if (options.waitForFreshHeartbeat === true) {
+    if (current.stale || (options.waitForFreshHeartbeat !== false && current.heartbeatStale)) {
+      settledSince = undefined;
+      if (options.waitForFreshHeartbeat !== false) {
         await sleep(250);
         continue;
       }
@@ -281,7 +282,7 @@ export async function waitForUnityCompile(
       };
     }
 
-    if (!current.isCompiling && !current.isUpdating && current.compilationCompleted !== false) {
+    if (current.isCompiling === false && current.isUpdating === false && current.compilationCompleted === true) {
       settledSince ??= Date.now();
       if (Date.now() - settledSince < 500) {
         await sleep(100);
@@ -306,11 +307,15 @@ export async function waitForUnityCompile(
     await sleep(250);
   }
 
+  const current = readCurrentEditorAndCompilationState(config);
   return {
     success: false,
     settled: false,
-    ...readCurrentEditorAndCompilationState(config),
-    message: `Timeout waiting for Unity compilation and asset updates (${timeoutMs}ms).`,
+    ...current,
+    message: `Timeout waiting for Unity compilation and asset updates (${timeoutMs}ms).` +
+      (current.heartbeatStale
+        ? " The Editor heartbeat is stale. Check Unity for a dialog or open menu, domain reload, long-running work, or a closed Editor; the cause is not known. Pending commands may still execute: poll their original command IDs instead of resubmitting."
+        : " Fresh settled compilation was not confirmed."),
   };
 }
 

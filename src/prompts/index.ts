@@ -124,14 +124,14 @@ export function handlePromptGet(
       const goal = stringArg(args, "whatToSync") || "the requested multiplayer behavior";
       return userPrompt(
         `First classify '${goal}' as a synchronized object's transform/physics, a transient message, or persistent space state. ` +
-        `Then execute banter://workflows 'synced-object' for the first case or 'networking' for the other cases. ` +
+        `Then use get_mcp_reference with source workflows and entryId synced-object for the first case or networking for the other cases. ` +
         "Do not implement both paths unless the requested behavior needs both."
       );
     }
 
     case "banter_best_practices":
       return userPrompt(
-        "Read banter://workflows and apply its authority, preflight, Visual Scripting, and WebRoot gates. " +
+        "Use get_mcp_reference with source workflows to retrieve the relevant domain and its authority, preflight, Visual Scripting, and WebRoot gates. " +
         "Use get_banter_sdk_info to separate source-checked catalogue evidence from the selected project's installed SDK. " +
         "Choose the smallest focused workflow and produce concrete validation evidence instead of advisory-only output."
       );
@@ -143,10 +143,14 @@ export function handlePromptGet(
 
 function graphPrompt(mode: "create" | "debug", detail: string): string {
   const action = mode === "create" ? "Create" : "Diagnose and repair";
-  return `${action} a Unity Visual Scripting graph for ${detail}. Read
-banter://unity-vs-json-manual and banter://sdk-compatibility first. If Banter
-nodes are involved, also read banter://custom-vs-nodes and run
-get_banter_sdk_info. Use the smallest graph possible. Run validate_vs_graph
+  return `${action} a Unity Visual Scripting graph for ${detail}. Run
+get_banter_sdk_info to identify the selected SDK. Use get_mcp_reference with
+source manual for the exact serialization rule needed; its compatibility
+corrections override conflicting older examples. For SideQuest custom nodes,
+use search_sidequest_vs_nodes to retrieve only the relevant definitions.
+Continue partial reference entries when needed and reuse unchanged excerpts
+already available in this task. Complete catalogs are for explicitly requested
+exhaustive audits. Use the smallest graph possible. Run validate_vs_graph
 before any write, then validate_vs_graph_in_unity after import. Run
 validate_banter_visual_scripting for Banter custom nodes, and inspect
 check_import_status plus get_console_logs before reporting the graph ready to

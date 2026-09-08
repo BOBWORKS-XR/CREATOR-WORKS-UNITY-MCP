@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import type { BanterMCPConfig } from "../lib/config.js";
+import { projectIdForPath } from "../lib/project-router.js";
 import {
   readBridgeInstanceDescriptor,
   type BridgeCommandResult,
@@ -18,6 +19,21 @@ export interface UnityCommandStatusResult extends Record<string, unknown> {
   editorInstanceId?: string;
   message?: string;
   error?: string;
+}
+
+export function pendingCommandTimeout(commandId: string, config: BanterMCPConfig, error: string) {
+  const projectId = config.projectId || projectIdForPath(config.unityProjectPath);
+  return {
+    success: false,
+    pending: true,
+    status: "result_timeout",
+    commandId,
+    projectId,
+    projectPath: config.unityProjectPath,
+    error,
+    message: "Completion is unknown; this command may still execute. Do not resubmit it. Check Unity for a dialog, open menu, reload, or long-running work, then poll the original command.",
+    nextAction: { tool: "get_unity_command_status", arguments: { commandId, projectId } },
+  };
 }
 
 export function getUnityCommandStatus(

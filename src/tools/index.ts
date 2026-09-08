@@ -9,6 +9,8 @@ import { validateVSGraph, VSValidationResult } from "./validate-vs-graph.js";
 import { writeVSGraph, WriteVSGraphResult } from "./write-vs-graph.js";
 import { generateVSGraph, GenerateVSGraphResult } from "./generate-vs-graph.js";
 import { queryProjectState, ProjectStateResult } from "./query-project.js";
+import { getMCPReference } from "./get-mcp-reference.js";
+import { boundedReadText, hasReadResponseBudget, readResponseBudget, READ_RESPONSE_BUDGET_SCHEMA } from "./read-response-budget.js";
 import {
   checkImportStatus,
   ImportStatusResult,
@@ -37,12 +39,16 @@ import {
   type BridgeCommandResult,
 } from "../lib/unity-bridge-transport.js";
 import type { UnityProjectRouter } from "../lib/project-router.js";
-import { getUnityCommandStatus } from "./get-unity-command-status.js";
+import { getUnityCommandStatus, pendingCommandTimeout } from "./get-unity-command-status.js";
 import {
   describeToolGroupSelection,
   isToolEnabled,
   type ToolGroupSelection,
 } from "./tool-groups.js";
+import {
+  BANTER_CUSTOM_VS_NODES,
+  type BanterCustomVSNode,
+} from "../resources/banter-custom-vs-nodes.js";
 
 export {
   ALWAYS_AVAILABLE_TOOLS,
@@ -86,6 +92,23 @@ function isImageToolResult(value: unknown): value is ImageToolResult {
  */
 export function registerTools(selection: ToolGroupSelection = "all"): Tool[] {
   const tools: Tool[] = [
+    {
+      name: "get_mcp_reference",
+      description: "Search bundled reference entries or read one entry in bounded pages. Prefer this over loading complete manuals/catalogs. Manual results always include compatibility corrections. Partial excerpts have continuation offsets; no network service is used.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          source: { type: "string", enum: ["manual", "components", "javascript", "workflows"] },
+          query: { type: "string", minLength: 1, maxLength: 128, description: "Keyword search; mutually exclusive with entryId" },
+          entryId: { type: "string", minLength: 1, maxLength: 128, description: "Exact entry ID from an earlier result" },
+          startOffset: { type: "integer", minimum: 0, default: 0, description: "Use nextOffset from the same entry to continue" },
+          revision: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Revision from the previous page; stale continuations fail explicitly" },
+          limit: { type: "integer", minimum: 1, maximum: 5, default: 3 },
+        },
+        required: ["source"],
+        anyOf: [{ required: ["query"] }, { required: ["entryId"] }],
+      },
+    },
     // VS Graph Tools
     {
       name: "validate_vs_graph",
@@ -556,6 +579,37 @@ The legacy tool name is retained for client compatibility. Detects com.sidequest
     },
 
     {
+      name: "search_sidequest_vs_nodes",
+      description: `Search the embedded source-observed SideQuest custom Visual Scripting node catalog without loading the complete catalog resource.
+Returns only bounded matching definitions, including the observed type, category, serialized fields, and default value inputs. The embedded entries came from a legacy Banter catalog; run get_banter_sdk_info before authoring so the selected project's actual package profile and namespace remain authoritative.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            minLength: 1,
+            maxLength: 128,
+            description: "Case-insensitive node name, full type, category, field, input name, or input type search",
+          },
+          category: {
+            type: "string",
+            minLength: 1,
+            maxLength: 128,
+            description: "Optional exact case-insensitive category filter",
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 25,
+            default: 10,
+            description: "Maximum matching node definitions to return",
+          },
+        },
+        required: ["query"],
+      },
+    },
+
+    {
       name: "search_unity_assets",
       description: `Search Unity's AssetDatabase using the same filter syntax as the Project window.
 Examples: "t:Prefab chair", "t:Scene", or "l:environment". Returns GUIDs, asset paths, names, and main asset types through a correlated bridge result.`,
@@ -849,9 +903,10 @@ Built-in Unity roots such as File, Edit, Assets, GameObject, Component, Window, 
 
     {
       name: "query_project_state",
-      description: `Query the current Unity project state.
+      description: `Query the current Unity scene hierarchy or components.
 Hierarchy/component reads explicitly refresh a live Unity bridge, report snapshot freshness, and return bounded results.
 Use rootPath, exact matching, depth, component, and field projections for targeted inspection instead of requesting a whole large scene.
+Use search_unity_assets and get_prefab_catalog for their separately bounded asset and prefab results.
 
 Requires the BanterMCPBridge Unity extension to be installed and Unity Editor running.`,
       inputSchema: {
@@ -859,7 +914,7 @@ Requires the BanterMCPBridge Unity extension to be installed and Unity Editor ru
         properties: {
           query: {
             type: "string",
-            enum: ["hierarchy", "components", "prefabs", "assets", "all"],
+            enum: ["hierarchy", "components"],
             description: "What to query",
           },
           filter: {
@@ -908,14 +963,20 @@ Requires the BanterMCPBridge Unity extension to be installed and Unity Editor ru
             type: "array",
             maxItems: 50,
             items: { type: "string" },
-            description: "Exact serialized property names to return for matching components, such as m_Materials or m_Mass",
+            description: "Serialized property names or paths, e.g. m_Enabled, m_Materials, m_Mass. Unreturned requests appear in missingProperties; absence is not false. Use fresh reads to verify snapshot gaps.",
+          },
+          componentDetails: {
+            type: "string",
+            enum: ["identity", "properties"],
+            default: "properties",
+            description: "identity returns component types and IDs without serialized properties; incompatible with propertyNames. Use for component inventories.",
           },
           maxResponseBytes: {
             type: "integer",
             minimum: 16384,
             maximum: 4194304,
-            default: 524288,
-            description: "Final UTF-8 JSON byte budget for returned hierarchy objects or components",
+            default: 65536,
+            description: "UTF-8 byte budget including metadata: 16384-4194304, default 65536. A limit, not a minimum response size.",
           },
           refresh: {
             type: "boolean",
@@ -1022,7 +1083,7 @@ Use after writing multiple files to force Unity to import them.`,
     {
       name: "wait_for_unity_compile",
       description: `Wait until Unity is no longer compiling or updating assets.
-Returns persistent compiler diagnostics from the bridge and fails when the current assembly compilation has errors. Use after C# writes, refreshes, or domain reloads before Play Mode and build operations.`,
+Waits through stale heartbeat/domain reload up to timeoutMs; requires a fresh settled Editor and completed compilation. Returns compiler diagnostics. A timeout does not cancel pending commands; poll their original IDs instead of resubmitting.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -1597,7 +1658,10 @@ Categories include: Buildings, Nature, Props, Characters, Vehicles, etc.`,
             description: "Search term to filter prefab names (case-insensitive)",
           },
           limit: {
-            type: "number",
+            type: "integer",
+            minimum: 1,
+            maximum: 500,
+            default: 100,
             description: "Maximum number of results to return (default: 100)",
           },
         },
@@ -1641,6 +1705,11 @@ Returns:
       },
     },
   ];
+  for (const tool of tools) {
+    if (hasReadResponseBudget(tool.name)) {
+      tool.inputSchema.properties = { ...tool.inputSchema.properties, maxResponseBytes: READ_RESPONSE_BUDGET_SCHEMA };
+    }
+  }
   return tools.filter((tool) => isToolEnabled(tool.name, selection));
 }
 
@@ -1661,9 +1730,13 @@ export async function handleToolCall(
     );
   }
 
+  const responseBudget = hasReadResponseBudget(name) ? readResponseBudget(args.maxResponseBytes) : undefined;
   let result: unknown;
 
   switch (name) {
+    case "get_mcp_reference":
+      result = getMCPReference(args);
+      break;
     case "validate_vs_graph":
       result = validateVSGraph(args.graphJson as string, {
         sdkProfile: detectSidequestSDKProfile(config),
@@ -1713,6 +1786,7 @@ export async function handleToolCall(
           fields: args.fields as string[] | undefined,
           componentType: args.componentType as string | undefined,
           propertyNames: args.propertyNames as string[] | undefined,
+          componentDetails: args.componentDetails as "identity" | "properties" | undefined,
           maxResponseBytes: args.maxResponseBytes as number | undefined,
           refresh: args.refresh as boolean | undefined,
           timeoutMs: args.timeoutMs as number | undefined,
@@ -1825,6 +1899,14 @@ export async function handleToolCall(
 
     case "get_banter_sdk_info":
       result = getBanterSDKInfo(config);
+      break;
+
+    case "search_sidequest_vs_nodes":
+      result = searchSidequestVSNodes(
+        args.query as string,
+        args.category as string | undefined,
+        args.limit as number | undefined
+      );
       break;
 
     case "search_unity_assets":
@@ -2138,13 +2220,87 @@ export async function handleToolCall(
     content: [
       {
         type: "text",
-        text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+        text: responseBudget !== undefined ? boundedReadText(name, result, responseBudget, config.mcpStatePath)
+          : typeof result === "string" ? result : JSON.stringify(result, null, ["query_project_state", "get_mcp_reference"].includes(name) ? undefined : 2),
       },
     ],
   };
 }
 
 // Helper functions for simple tools
+
+export function searchSidequestVSNodes(
+  query: string,
+  category?: string,
+  limit?: number
+): unknown {
+  const normalizedQuery = typeof query === "string" ? query.trim().toLowerCase() : "";
+  if (normalizedQuery.length === 0 || normalizedQuery.length > 128) {
+    return { success: false, error: "query must contain between 1 and 128 characters.", nodes: [] };
+  }
+
+  if (category !== undefined && typeof category !== "string") {
+    return { success: false, error: "category must be a string.", nodes: [] };
+  }
+  const normalizedCategory = category === undefined ? undefined : category.trim().toLowerCase();
+  if (normalizedCategory !== undefined && (normalizedCategory.length === 0 || normalizedCategory.length > 128)) {
+    return { success: false, error: "category must contain between 1 and 128 characters.", nodes: [] };
+  }
+
+  const maxResults = limit ?? 10;
+  if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 25) {
+    return { success: false, error: "limit must be a whole number between 1 and 25.", nodes: [] };
+  }
+
+  const terms = normalizedQuery.split(/\s+/).filter(Boolean);
+  const catalog = Object.values(
+    BANTER_CUSTOM_VS_NODES as Record<string, BanterCustomVSNode>
+  );
+  const matches = catalog.filter((node) => {
+    if (normalizedCategory !== undefined && node.category.toLowerCase() !== normalizedCategory) {
+      return false;
+    }
+    const searchable = [
+      node.name,
+      node.fullType,
+      node.category,
+      ...node.defaultValues.flatMap((value) => [value.name, value.type || ""]),
+      ...Object.keys(node.serializedFields),
+    ].join(" ").toLowerCase();
+    return terms.every((term) => searchable.includes(term));
+  });
+
+  const rank = (node: BanterCustomVSNode): number => {
+    const name = node.name.toLowerCase();
+    const fullType = node.fullType.toLowerCase();
+    if (name === normalizedQuery) return 0;
+    if (fullType === normalizedQuery) return 1;
+    if (name.startsWith(normalizedQuery)) return 2;
+    if (fullType.endsWith(`.${normalizedQuery}`)) return 3;
+    return 4;
+  };
+  matches.sort((left, right) => rank(left) - rank(right) || left.name.localeCompare(right.name));
+
+  return {
+    success: true,
+    query: query.trim(),
+    category: category?.trim(),
+    count: Math.min(matches.length, maxResults),
+    totalMatches: matches.length,
+    truncated: matches.length > maxResults,
+    catalogSize: catalog.length,
+    catalogScope: "Source-observed legacy Banter custom nodes; confirm the selected package profile with get_banter_sdk_info before authoring.",
+    nodes: matches.slice(0, maxResults).map((node) => ({
+      name: node.name,
+      fullType: node.fullType,
+      category: node.category,
+      version: node.version,
+      isEvent: node.isEvent,
+      defaultValues: node.defaultValues,
+      serializedFields: node.serializedFields,
+    })),
+  };
+}
 
 async function getConsoleLogs(
   level: string | undefined,
@@ -2227,6 +2383,7 @@ async function getConsoleLogs(
     if (!Number.isInteger(maxLimit) || maxLimit < 1 || maxLimit > 1000) {
       return { success: false, error: "limit must be a whole number between 1 and 1000.", logs: [] };
     }
+    const matchingResults = logs.length;
     logs = logs.slice(-maxLimit);
 
     const snapshotTimestamp = typeof data.timestamp === "number" ? data.timestamp : undefined;
@@ -2250,6 +2407,8 @@ async function getConsoleLogs(
     return {
       success: true,
       count: logs.length,
+      matchingResults,
+      limitTruncated: matchingResults > logs.length,
       logs,
       source: logPath,
       snapshotTimestamp,
@@ -3166,12 +3325,8 @@ async function executeEditorMenuItem(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  return {
-    success: false,
-    commandId: command.commandId,
-    status: "result_timeout",
-    error: `Timed out after ${timeoutMs}ms waiting for the Unity Editor menu result.`,
-  };
+  return pendingCommandTimeout(command.commandId, config,
+    `Timed out after ${timeoutMs}ms waiting for the Unity Editor menu result.`);
 }
 
 export function combineEditorMenuSettleResult(
@@ -3639,6 +3794,13 @@ async function getPrefabCatalog(
   limit: number | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 500)) {
+    return {
+      success: false,
+      error: "limit must be a whole number between 1 and 500.",
+    };
+  }
+
   const fs = await import("fs");
   const path = await import("path");
 
@@ -3654,7 +3816,7 @@ async function getPrefabCatalog(
 
   try {
     const catalog: PrefabCatalog = JSON.parse(fs.readFileSync(catalogPath, "utf-8"));
-    const maxLimit = limit || 100;
+    const maxLimit = limit ?? 100;
     let results: PrefabCatalogEntry[] = [];
 
     // Collect prefabs from categories
@@ -3697,6 +3859,7 @@ async function getPrefabCatalog(
       totalInCatalog: catalog.totalCount,
       matchingResults: totalMatches,
       returnedResults: results.length,
+      limitTruncated: totalMatches > results.length,
       catalogAge: `${Math.round((Date.now() - catalog.timestamp) / 1000 / 60)} minutes ago`,
       categories: categorySummary,
       prefabs: results.map((p) => ({

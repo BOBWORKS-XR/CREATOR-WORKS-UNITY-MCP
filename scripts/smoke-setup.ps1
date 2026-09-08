@@ -64,7 +64,7 @@ try {
         $codexConfig -notmatch '\[mcp_servers\.creator-works\]' -or
         $codexConfig -match '\[mcp_servers\.banter\]' -or
         $codexConfig -notmatch 'creator-works-mcp\.mjs' -or
-        $codexConfig -notmatch 'CREATOR_WORKS_TOOL_GROUPS = "read,author,banter"') {
+        $codexConfig -notmatch 'CREATOR_WORKS_TOOL_GROUPS = "core,banter"') {
         throw "Existing Codex configuration was not preserved and updated"
     }
 
@@ -73,7 +73,7 @@ try {
         $null -eq $claudeConfig.mcpServers.other -or
         $null -ne $claudeConfig.mcpServers.banter -or
         $claudeConfig.mcpServers.'creator-works'.args[0] -notmatch 'creator-works-mcp\.mjs$' -or
-        $claudeConfig.mcpServers.'creator-works'.env.CREATOR_WORKS_TOOL_GROUPS -ne "read,author,banter") {
+        $claudeConfig.mcpServers.'creator-works'.env.CREATOR_WORKS_TOOL_GROUPS -ne "core,banter") {
         throw "Existing Claude configuration was not preserved and updated"
     }
 

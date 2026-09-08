@@ -1,4 +1,4 @@
-export const TOOL_GROUP_NAMES = ["read", "author", "test", "banter", "shadergraph"] as const;
+export const TOOL_GROUP_NAMES = ["core", "read", "author", "test", "banter", "shadergraph"] as const;
 
 export type ToolGroupName = typeof TOOL_GROUP_NAMES[number];
 export type ToolGroupSelection = "all" | ReadonlySet<ToolGroupName>;
@@ -11,7 +11,30 @@ export const ALWAYS_AVAILABLE_TOOLS = new Set([
 ]);
 
 export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<string>>> = {
+  core: new Set([
+    "query_project_state",
+    "check_import_status",
+    "wait_for_unity_compile",
+    "get_console_logs",
+    "search_unity_assets",
+    "get_unity_scenes",
+    "save_unity_scene",
+    "refresh_unity_assets",
+    "create_gameobject",
+    "delete_gameobject",
+    "modify_gameobject",
+    "add_component",
+    "remove_component",
+    "set_component_property",
+    "set_object_reference",
+    "set_asset_reference",
+    "instantiate_prefab",
+    "scan_prefabs",
+    "get_prefab_catalog",
+    "get_object_bounds",
+  ]),
   read: new Set([
+    "get_mcp_reference",
     "validate_vs_graph",
     "validate_vs_graph_in_unity",
     "validate_banter_visual_scripting",
@@ -34,6 +57,10 @@ export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<s
     "validate_shader_graph",
   ]),
   author: new Set([
+    "get_mcp_reference",
+    "validate_vs_graph",
+    "get_banter_sdk_info",
+    "search_sidequest_vs_nodes",
     "generate_vs_graph",
     "write_vs_graph",
     "write_webroot_js",
@@ -56,6 +83,9 @@ export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<s
     "instantiate_prefab",
     "batch_instantiate_prefabs",
     "scan_prefabs",
+    "get_shader_graph_capabilities",
+    "list_shader_graphs",
+    "inspect_shader_graph",
     "create_shader_graph",
     "add_shader_graph_node",
     "connect_shader_graph_nodes",
@@ -73,6 +103,8 @@ export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<s
     "validate_shader_graph",
   ]),
   banter: new Set([
+    "get_mcp_reference",
+    "search_sidequest_vs_nodes",
     "validate_vs_graph",
     "generate_vs_graph",
     "write_vs_graph",

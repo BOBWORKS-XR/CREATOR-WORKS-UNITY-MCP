@@ -140,12 +140,13 @@
               <p class="hint">Tools exposed to connected clients</p>
             </div>
             <select id="toolGroups" class="input select-input">
-              <option value="all">Full Unity + Banter</option>
+              <option value="core">Token Saver (recommended)</option>
+              <option value="all">Full Unity + Banter (high context)</option>
               <option value="read">Inspection</option>
-              <option value="read,author,banter">Banter workflow</option>
-              <option value="read,author,shadergraph">Shader Graph preview</option>
-              <option value="read,author">Unity authoring</option>
-              <option value="read,test">Testing</option>
+              <option value="core,banter">Banter workflow</option>
+              <option value="core,shadergraph">Shader Graph preview</option>
+              <option value="core,author">Unity authoring</option>
+              <option value="core,test">Testing</option>
               <option value="none">Minimal routing</option>
             </select>
           </div>
@@ -172,6 +173,17 @@
             </label>
           </div>
 
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="allowAllTests">Allow Running All Tests</label>
+              <p class="hint">Allow MCP to run the entire test suite without filters</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="allowAllTests" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
           <div class="action-buttons">
             <button class="btn btn-secondary" id="applyCodexBtn" type="button">Apply to Codex</button>
             <button class="btn btn-secondary" id="applyConfigBtn" type="button">Apply to Claude Code</button>
@@ -189,7 +201,7 @@
     </main>
 
     <footer class="footer">
-      <p><span class="brand-creator">CREATOR</span> <span class="brand-works">WORKS</span> MCP <span id="appVersion">v2.5.1</span> <span class="footer-separator">|</span> <a href="#" id="githubLink">GitHub</a></p>
+      <p><span class="brand-creator">CREATOR</span> <span class="brand-works">WORKS</span> MCP <span id="appVersion">v2.6.0-rc.1</span> <span class="footer-separator">|</span> <a href="#" id="githubLink">GitHub</a></p>
     </footer>
   </div>
 

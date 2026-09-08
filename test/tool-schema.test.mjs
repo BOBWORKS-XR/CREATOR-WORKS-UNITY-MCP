@@ -11,6 +11,7 @@ import {
   normalizeUnitySceneAssetPath,
   playModeStateMatches,
   registerTools,
+  searchSidequestVSNodes,
 } from "../dist/tools/index.js";
 
 const tools = new Map(registerTools().map((tool) => [tool.name, tool]));
@@ -131,16 +132,25 @@ test("project discovery exposes packages and bounded AssetDatabase search", () =
 
 test("project state queries expose bounded exact hierarchy inspection", () => {
   const schema = tools.get("query_project_state")?.inputSchema;
+  assert.deepEqual(schema?.properties.query.enum, ["hierarchy", "components"]);
   assert.deepEqual(schema?.properties.match.enum, ["contains", "exact"]);
   assert.equal(schema?.properties.includeDescendants.default, false);
   assert.equal(schema?.properties.maxDepth.maximum, 100);
   assert.equal(schema?.properties.maxResults.default, 200);
   assert.equal(schema?.properties.maxResults.maximum, 5000);
   assert.equal(schema?.properties.propertyNames.maxItems, 50);
-  assert.equal(schema?.properties.maxResponseBytes.default, 524288);
+  assert.equal(schema?.properties.maxResponseBytes.default, 65536);
   assert.equal(schema?.properties.maxResponseBytes.maximum, 4194304);
   assert.equal(schema?.properties.refresh.default, true);
   assert.equal(schema?.properties.timeoutMs.maximum, 120000);
+});
+
+test("prefab catalog exposes an explicit bounded result limit", () => {
+  const schema = tools.get("get_prefab_catalog")?.inputSchema;
+  assert.equal(schema?.properties.limit.type, "integer");
+  assert.equal(schema?.properties.limit.minimum, 1);
+  assert.equal(schema?.properties.limit.maximum, 500);
+  assert.equal(schema?.properties.limit.default, 100);
 });
 
 test("console queries expose normalized errors and bounded source filters", () => {
@@ -188,6 +198,31 @@ test("Visual Scripting write tools constrain asset names", () => {
   assert.deepEqual(node?.properties.size.required, ["width", "height"]);
   assert.equal(generation?.properties.layout.properties.gridSize.minimum, 1);
   assert.equal(generation?.properties.layout.properties.horizontalGap.maximum, 2048);
+});
+
+test("SideQuest Visual Scripting catalog search is targeted and bounded", () => {
+  const schema = tools.get("search_sidequest_vs_nodes")?.inputSchema;
+  assert.deepEqual(schema?.required, ["query"]);
+  assert.equal(schema?.properties.query.maxLength, 128);
+  assert.equal(schema?.properties.limit.default, 10);
+  assert.equal(schema?.properties.limit.maximum, 25);
+
+  const exact = searchSidequestVSNodes("TeleportTo", "User", 10);
+  assert.equal(exact.success, true);
+  assert.equal(exact.nodes[0].name, "TeleportTo");
+  assert.equal(exact.nodes[0].defaultValues.some((value) => value.name === "Stop Velocity"), true);
+
+  const bounded = searchSidequestVSNodes("on", undefined, 2);
+  assert.equal(bounded.success, true);
+  assert.equal(bounded.nodes.length, 2);
+  assert.equal(bounded.truncated, true);
+
+  const invalid = searchSidequestVSNodes("TeleportTo", undefined, 26);
+  assert.equal(invalid.success, false);
+  assert.deepEqual(invalid.nodes, []);
+  for (const category of [null, 42, {}, []]) {
+    assert.equal(searchSidequestVSNodes("TeleportTo", category).success, false);
+  }
 });
 
 test("Unity Test Runner tools expose bounded filters and safe run IDs", () => {

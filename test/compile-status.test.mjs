@@ -140,7 +140,7 @@ test("check_import_status cannot report success over a failed current compilatio
   }
 });
 
-test("fresh compiler status can settle while the lightweight Editor heartbeat is stale", async () => {
+test("fresh compiler status does not prove a blocked Editor has settled", async () => {
   const fixture = await createFixture();
   try {
     const now = Date.now();
@@ -158,11 +158,33 @@ test("fresh compiler status can settle while the lightweight Editor heartbeat is
     }));
 
     const result = await waitForUnityCompile(1000, fixture.config);
-    assert.equal(result.success, true);
-    assert.equal(result.settled, true);
+    assert.equal(result.success, false);
+    assert.equal(result.settled, false);
     assert.equal(result.heartbeatStale, true);
     assert.equal(result.compilationStale, false);
-    assert.match(result.message, /heartbeat is stale/i);
+    assert.match(result.message, /heartbeat.*stale/i);
+  } finally {
+    await rm(fixture.projectPath, { recursive: true, force: true });
+  }
+});
+
+test("default compile wait survives stale state and domain reload within its deadline", async () => {
+  const fixture = await createFixture();
+  try {
+    const editorPath = path.join(fixture.config.mcpStatePath, "editor-state.json");
+    const compilerPath = path.join(fixture.config.mcpStatePath, "compilation-status.json");
+    await writeFile(editorPath, JSON.stringify({timestamp: Date.now() - 10000, isCompiling: true}));
+    await writeFile(compilerPath, JSON.stringify({timestamp: Date.now() - 10000, completed: false}));
+    const refreshed = new Promise(resolve => setTimeout(async () => {
+      await writeFile(compilerPath, JSON.stringify({timestamp: Date.now(), completed: true, hasErrors: false}));
+      await writeFile(editorPath, JSON.stringify({timestamp: Date.now(), isCompiling: false, isUpdating: false}));
+      resolve();
+    }, 100));
+    const result = await waitForUnityCompile(2000, fixture.config);
+    await refreshed;
+    assert.equal(result.success, true);
+    assert.equal(result.settled, true);
+    assert.equal(result.heartbeatStale, false);
   } finally {
     await rm(fixture.projectPath, { recursive: true, force: true });
   }

@@ -2,7 +2,7 @@ let config = {
   channels: [],
   active_channel_id: null,
   mcp_server_path: '',
-  tool_groups: 'all',
+  tool_groups: 'core',
   auto_start: true,
   enable_custom_scripts: false
 };
@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     'codexState', 'claudeState', 'antigravityState', 'opencodeState',
     'setupBtn', 'setupMessage', 'projectsList', 'emptyState', 'addProjectBtn',
     'updateBridgesBtn',
-    'mcpServerPath', 'toolGroups', 'autoConfig', 'customScripts', 'applyConfigBtn',
+    'mcpServerPath', 'toolGroups', 'autoConfig', 'customScripts', 'allowAllTests', 'applyConfigBtn',
     'applyCodexBtn', 'applyAntigravityBtn', 'applyOpenCodeBtn',
     'disconnectBtn', 'disconnectCodexBtn', 'disconnectAntigravityBtn', 'disconnectOpenCodeBtn',
     'installExtensionBtn',
@@ -105,6 +105,30 @@ function setupEventListeners() {
         unityProjectPath: channel.unity_project_path,
         enabled: config.enable_custom_scripts
       });
+    }
+  });
+
+  elements.allowAllTests.addEventListener('change', async function() {
+    const previous = config.allow_all_tests !== false;
+    const channel = getActiveChannel();
+    config.allow_all_tests = elements.allowAllTests.checked;
+    elements.allowAllTests.disabled = true;
+    try {
+      if (!await saveLauncherConfig('Failed to save test policy preference')) {
+        config.allow_all_tests = previous;
+        elements.allowAllTests.checked = previous;
+        return;
+      }
+      if (channel) {
+        await window.__TAURI__.core.invoke('set_unity_allow_all_tests', {
+          unityProjectPath: channel.unity_project_path,
+          enabled: config.allow_all_tests
+        });
+      }
+    } catch (error) {
+      showToast('Preference saved, but the selected project test policy was not updated: ' + String(error), 'error');
+    } finally {
+      elements.allowAllTests.disabled = false;
     }
   });
 
@@ -216,7 +240,7 @@ async function refreshOnboardingStatus() {
 
 function updateUI() {
   elements.mcpServerPath.value = config.mcp_server_path || '';
-  const toolGroups = config.tool_groups || 'all';
+  const toolGroups = config.tool_groups || 'core';
   let option = Array.from(elements.toolGroups.options).find(function(item) {
     return item.value === toolGroups;
   });
@@ -229,6 +253,7 @@ function updateUI() {
   elements.toolGroups.value = toolGroups;
   elements.autoConfig.checked = config.auto_start !== false;
   elements.customScripts.checked = config.enable_custom_scripts === true;
+  elements.allowAllTests.checked = config.allow_all_tests !== false;
   renderProjects();
   updateSetupStatus();
 }
@@ -334,7 +359,7 @@ async function runQuickSetup() {
       configureClaude: elements.connectClaude.checked,
       configureAntigravity: elements.connectAntigravity.checked,
       configureOpencode: elements.connectOpenCode.checked,
-      toolGroups: config.tool_groups || 'all',
+      toolGroups: config.tool_groups || 'core',
       enableCustomScripts: config.enable_custom_scripts === true
     });
     await refreshAll();
@@ -502,7 +527,7 @@ async function updateCodexConfig(channel) {
   await window.__TAURI__.core.invoke('update_codex_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
-    toolGroups: config.tool_groups || 'all'
+    toolGroups: config.tool_groups || 'core'
   });
 }
 
@@ -510,7 +535,7 @@ async function updateClaudeConfig(channel) {
   await window.__TAURI__.core.invoke('update_claude_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
-    toolGroups: config.tool_groups || 'all'
+    toolGroups: config.tool_groups || 'core'
   });
 }
 
@@ -518,7 +543,7 @@ async function updateAntigravityConfig(channel) {
   await window.__TAURI__.core.invoke('update_antigravity_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
-    toolGroups: config.tool_groups || 'all'
+    toolGroups: config.tool_groups || 'core'
   });
 }
 
@@ -526,7 +551,7 @@ async function updateOpenCodeConfig(channel) {
   await window.__TAURI__.core.invoke('update_opencode_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
-    toolGroups: config.tool_groups || 'all'
+    toolGroups: config.tool_groups || 'core'
   });
 }
 
@@ -644,8 +669,10 @@ async function installExtension() {
 async function saveLauncherConfig(errorMessage) {
   try {
     await window.__TAURI__.core.invoke('save_config', { config: config });
+    return true;
   } catch (error) {
     showToast(errorMessage + ': ' + String(error), 'error');
+    return false;
   }
 }
 

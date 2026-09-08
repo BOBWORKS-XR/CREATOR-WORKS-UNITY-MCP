@@ -45,6 +45,6 @@ focused prompts such as `banter_ui_workflow`. The legacy interaction,
 multiplayer, Visual Scripting, and best-practice prompts now route into the same
 evidence-linked contracts.
 
-The launcher preset **Banter workflow** enables `read,author,banter`. A narrower
+The launcher preset **Banter workflow** enables `core,banter`. A narrower
 custom profile remains valid when the selected path does not require scene
 authoring.

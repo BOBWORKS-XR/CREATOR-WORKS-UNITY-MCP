@@ -47,14 +47,19 @@ Unity writes an acknowledgement under the command UUID, and bounds queries use t
 State-export requests also receive unique filenames, so simultaneous `query_project_state` calls do not overwrite each other before Unity reads them.
 
 Hierarchy and component queries with a `rootPath`, `componentType`, requested
-`propertyNames`, or exact filter use a correlated live query when the selected
+`propertyNames`, or any nonempty identity filter use a correlated live query when the selected
 Editor heartbeat is live. Unity traverses only the requested subtree or scans
 lightweight object/component identities before serializing matches. Results are
 bounded and do not rewrite `scene-hierarchy.json`. Broad reads retain the
 explicit full-snapshot export path. The response reports refresh state,
 snapshot/editor ages, dirty-scene state, returned byte count, and bounded query
-metadata. `maxResponseBytes` limits the serialized item payload to 16 KiB through
-4 MiB. Exact `propertyNames` reduce component serialization further; requesting
+metadata. `maxResponseBytes` limits the complete compact JSON response text,
+including metadata, to 16 KiB through 4 MiB (default 64 KiB).
+`query.responseBytes` measures that exact UTF-8 text, excluding the MCP transport
+envelope. Both live and saved queries filter and project before limiting items;
+the server reports truncation rather than implying that omitted matches do not
+exist. If no complete item fits, the response suggests narrower fields or a
+larger explicit budget. Exact `propertyNames` reduce component serialization further; requesting
 `materials`, `sharedMaterials`, or `m_Materials` on a Renderer returns a
 JSON-encoded summary of at most 64 shared materials with name, asset path, asset
 GUID, and shader. Unsupported field names fail explicitly; world and local

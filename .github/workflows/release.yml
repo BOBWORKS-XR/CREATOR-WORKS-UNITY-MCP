@@ -39,9 +39,9 @@ jobs:
           projectPath: launcher
           tagName: ${{ github.ref_name }}
           releaseName: "Creator Works MCP __VERSION__"
-          releaseBody: "The guided Windows installer includes the MCP server, Unity bridge, and a private Node.js 24 LTS runtime. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments."
+          releaseBody: "Creator Works MCP packages the server, Unity bridge, and a private Node.js 24 LTS runtime for Windows, Linux, and macOS. Windows packages are unsigned and macOS packages are not notarized. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments. See the tagged README and version-specific release notes for benefits, profile choices, and acceptance limits."
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
           args: "--bundles nsis"
 
       - name: Attach standalone ZIP and checksums
@@ -61,9 +61,11 @@ jobs:
           }
           $checksumPath = Join-Path $PWD "release\SHA256SUMS.txt"
           [System.IO.File]::WriteAllLines($checksumPath, $checksums, [System.Text.UTF8Encoding]::new($false))
+          $standalonePath = $standalone.FullName.Replace('\', '/')
+          $checksumUploadPath = $checksumPath.Replace('\', '/')
           $maxAttempts = 5
           for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-            gh release upload "${{ github.ref_name }}" $standalone.FullName $checksumPath --clobber --repo "${{ github.repository }}"
+            gh release upload "${{ github.ref_name }}" $standalonePath $checksumUploadPath --clobber --repo "${{ github.repository }}"
             if ($LASTEXITCODE -eq 0) {
               break
             }
@@ -74,3 +76,149 @@ jobs:
             Write-Warning "Release asset upload attempt $attempt failed; retrying in $delaySeconds seconds."
             Start-Sleep -Seconds $delaySeconds
           }
+
+  linux:
+    name: Linux AppImage, DEB, and RPM bundle
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install Rust + Tauri system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            file
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run check:version
+      - run: npm run release:launcher
+      - run: npm audit --audit-level=low
+      - run: cargo test
+        working-directory: launcher/src-tauri
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NO_STRIP: 1
+        with:
+          projectPath: launcher
+          tagName: ${{ github.ref_name }}
+          releaseName: "Creator Works MCP __VERSION__"
+          releaseBody: "Creator Works MCP packages the server, Unity bridge, and a private Node.js 24 LTS runtime for Windows, Linux, and macOS. Windows packages are unsigned and macOS packages are not notarized. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments. See the tagged README and version-specific release notes for benefits, profile choices, and acceptance limits."
+          releaseDraft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          args: "--bundles appimage,deb,rpm"
+
+  macos:
+    name: macOS DMG bundle
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run check:version
+      - run: npm run release:launcher
+      - run: npm audit --audit-level=low
+      - run: cargo test
+        working-directory: launcher/src-tauri
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: launcher
+          tagName: ${{ github.ref_name }}
+          releaseName: "Creator Works MCP __VERSION__"
+          releaseBody: "Creator Works MCP packages the server, Unity bridge, and a private Node.js 24 LTS runtime for Windows, Linux, and macOS. Windows packages are unsigned and macOS packages are not notarized. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments. See the tagged README and version-specific release notes for benefits, profile choices, and acceptance limits."
+          releaseDraft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          args: "--bundles dmg"
+
+  checksums:
+    name: Consolidate SHA256 checksums
+    runs-on: ubuntu-latest
+    needs: [windows, linux, macos]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Compute consolidated checksums and upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          max_attempts=5
+          for attempt in $(seq 1 $max_attempts); do
+            if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" --json assets > release-assets.json &&
+               node scripts/release-checksums.mjs release-assets.json > SHA256SUMS.txt; then
+              break
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "Release asset query returned empty after $max_attempts attempts." >&2
+              exit 1
+            fi
+            delay=$((5 * 2 ** (attempt - 1)))
+            echo "Release asset query attempt $attempt empty; retrying in $delay seconds..." >&2
+            sleep $delay
+          done
+
+          for attempt in $(seq 1 $max_attempts); do
+            if gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber --repo "${{ github.repository }}"; then
+              break
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "Release checksum upload failed after $max_attempts attempts." >&2
+              exit 1
+            fi
+            delay=$((5 * 2 ** (attempt - 1)))
+            echo "Release checksum upload attempt $attempt failed; retrying in $delay seconds..." >&2
+            sleep $delay
+          done
+
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+
+          gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq '.assets[] | "\(.id) \(.name)"' | while read -r asset_id asset_name; do
+            label=""
+            case "$asset_name" in
+              *.exe)
+                label="Creator-Works-MCP-${VERSION}-windows-x64-setup.exe"
+                ;;
+              *.dmg)
+                label="Creator-Works-MCP-${VERSION}-macos-arm64.dmg"
+                ;;
+              *.AppImage)
+                label="Creator-Works-MCP-${VERSION}-linux-x86_64.AppImage"
+                ;;
+              *.deb)
+                label="Creator-Works-MCP-${VERSION}-linux-amd64.deb"
+                ;;
+              *.rpm)
+                label="Creator-Works-MCP-${VERSION}-1-linux.x86_64.rpm"
+                ;;
+              *-standalone.zip)
+                label="Creator-Works-MCP-${VERSION}-standalone.zip"
+                ;;
+            esac
+            if [ -n "$label" ]; then
+              gh api -X PATCH "repos/${{ github.repository }}/releases/assets/$asset_id" -f label="$label" >/dev/null 2>&1 || true
+            fi
+          done
+

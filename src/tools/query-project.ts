@@ -8,6 +8,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { BanterMCPConfig } from "../lib/config.js";
 import { dispatchUnityBridgeCommand } from "../lib/unity-bridge-transport.js";
+import { pendingCommandTimeout } from "./get-unity-command-status.js";
 
 export type ProjectStateMatchMode = "contains" | "exact";
 
@@ -20,6 +21,7 @@ export interface ProjectStateQueryOptions {
   fields?: string[];
   componentType?: string;
   propertyNames?: string[];
+  componentDetails?: "identity" | "properties";
   maxResponseBytes?: number;
   refresh?: boolean;
   timeoutMs?: number;
@@ -37,6 +39,7 @@ interface QuerySummary {
   fields?: string[];
   componentType?: string;
   propertyNames?: string[];
+  componentDetails?: "identity" | "properties";
   maxResponseBytes: number;
   responseBytes: number;
 }
@@ -88,7 +91,7 @@ export interface ProjectStateResult {
 const DEFAULT_MAX_RESULTS = 200;
 const MAX_RESULTS_LIMIT = 5000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 30000;
-const DEFAULT_MAX_RESPONSE_BYTES = 512 * 1024;
+const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
 const MIN_RESPONSE_BYTES = 16 * 1024;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const HIERARCHY_FIELDS = new Set([
@@ -115,6 +118,7 @@ const COMPONENT_FIELDS = new Set([
   "fullType",
   "globalObjectId",
   "properties",
+  "missingProperties",
 ]);
 
 /**
@@ -133,13 +137,23 @@ export async function queryProjectState(
     };
   }
 
+  if (query !== "hierarchy" && query !== "components") {
+    return {
+      success: false,
+      error: query === "assets"
+        ? "Use search_unity_assets for bounded AssetDatabase results."
+        : query === "prefabs"
+          ? "Use get_prefab_catalog for bounded prefab results."
+          : "query must be hierarchy or components. Use the dedicated asset, prefab, console, import, and bridge-status tools instead of a combined state dump.",
+    };
+  }
+
   const validationError = validateQueryOptions(query, options);
   if (validationError) {
     return { success: false, error: validationError };
   }
 
   try {
-    const stateBackedQuery = query === "hierarchy" || query === "components" || query === "all";
     if ((query === "hierarchy" || query === "components") &&
         options.refresh !== false &&
         isTargetedHierarchyQuery(filter, options)) {
@@ -149,33 +163,22 @@ export async function queryProjectState(
           error: "Unity bridge heartbeat is stale or unavailable; a fresh targeted hierarchy query cannot be verified.",
         };
       }
-      return requestTargetedHierarchyQuery(query, filter, config, options);
+      return boundQueryResult(await requestTargetedHierarchyQuery(query, filter, config, options));
     }
 
-    const refresh = stateBackedQuery
-      ? await refreshHierarchyIfRequested(config, options)
-      : { requested: false, refreshed: false };
+    const refresh = await refreshHierarchyIfRequested(config, options);
 
     switch (query) {
       case "hierarchy":
-        return readHierarchy(config, filter, options, refresh);
+        return boundQueryResult(readHierarchy(config, filter, options, refresh));
 
       case "components":
-        return readComponentsFromHierarchy(config, filter, options, refresh);
-
-      case "prefabs":
-        return readPrefabCatalog(config, filter);
-
-      case "assets":
-        return readAssets(config, filter);
-
-      case "all":
-        return readAllState(config, refresh);
+        return boundQueryResult(readComponentsFromHierarchy(config, filter, options, refresh));
 
       default:
         return {
           success: false,
-          error: `Unknown query type: ${query}. Valid options: hierarchy, components, prefabs, assets, all`,
+          error: `Unknown query type: ${query}. Valid options: hierarchy, components`,
         };
     }
   } catch (error) {
@@ -187,6 +190,12 @@ export async function queryProjectState(
 }
 
 function validateQueryOptions(query: string, options: ProjectStateQueryOptions): string | undefined {
+  if (options.componentDetails !== undefined && !["identity", "properties"].includes(options.componentDetails)) {
+    return "componentDetails must be identity or properties.";
+  }
+  if (options.componentDetails === "identity" && options.propertyNames?.length) {
+    return "propertyNames cannot be used with componentDetails: identity.";
+  }
   if (options.match !== undefined && options.match !== "contains" && options.match !== "exact") {
     return "match must be either contains or exact.";
   }
@@ -239,7 +248,9 @@ function isTargetedHierarchyQuery(
     normalizeObjectPath(options.rootPath) ||
     options.componentType ||
     options.propertyNames?.length ||
-    (options.match === "exact" && filter)
+    options.componentDetails === "identity" ||
+    (options.fields?.length && !options.fields.includes("components") && !options.fields.includes("properties")) ||
+    filter
   );
 }
 
@@ -261,6 +272,9 @@ async function requestTargetedHierarchyQuery(
     maxResults: options.maxResults ?? DEFAULT_MAX_RESULTS,
     componentType: options.componentType || "",
     propertyNames: options.propertyNames || [],
+    includeComponents: query === "components" || !options.fields?.length || options.fields.includes("components"),
+    includeComponentProperties: options.componentDetails !== "identity" &&
+      (query !== "components" || Boolean(options.propertyNames?.length) || !options.fields?.length || options.fields.includes("properties")),
   }, config, Math.min(timeoutMs, 3000));
 
   if (dispatch.acknowledgement?.success === false) {
@@ -294,7 +308,12 @@ async function requestTargetedHierarchyQuery(
         const timestamp = result.timestamp;
         const fields = options.fields ? Array.from(new Set(options.fields)) : undefined;
         const rawItems = query === "hierarchy" ? result.objects || [] : result.components || [];
-        const projectedItems = fields ? rawItems.map((item) => pickFields(item, fields)) : rawItems;
+        const projectedItems = rawItems.map((item) => {
+          const projected = query === "hierarchy"
+            ? projectMatchingComponents(item, options.componentType, options.propertyNames, options.componentDetails)
+            : projectComponent(item, options.propertyNames, options.componentDetails);
+          return fields?.length ? pickFields(projected, fields) : projected;
+        });
         const bounded = boundItemsByBytes(projectedItems, options.maxResponseBytes);
         const items = bounded.items;
         const querySummary: QuerySummary = {
@@ -309,6 +328,7 @@ async function requestTargetedHierarchyQuery(
           fields,
           componentType: options.componentType,
           propertyNames: options.propertyNames,
+          componentDetails: options.componentDetails,
           maxResponseBytes: bounded.maxResponseBytes,
           responseBytes: bounded.responseBytes,
         };
@@ -352,10 +372,8 @@ async function requestTargetedHierarchyQuery(
     await sleep(50);
   }
 
-  return {
-    success: false,
-    error: `Timed out after ${timeoutMs}ms waiting for Unity's targeted hierarchy result; no stale snapshot was substituted.`,
-  };
+  return pendingCommandTimeout(dispatch.commandId, config,
+    `Timed out after ${timeoutMs}ms waiting for Unity's targeted hierarchy result; no stale snapshot was substituted.`);
 }
 
 async function refreshHierarchyIfRequested(
@@ -476,15 +494,14 @@ function buildSnapshotInfo(
   };
 }
 
-function selectHierarchyObjects(
+function matchingHierarchyObjects(
   objects: Array<Record<string, unknown>>,
   filter: string | undefined,
   options: ProjectStateQueryOptions
-): { items: Array<Record<string, unknown>>; summary: QuerySummary } {
+): Array<Record<string, unknown>> {
   const match = options.match ?? "contains";
   const rootPath = normalizeObjectPath(options.rootPath);
   const includeDescendants = options.includeDescendants === true;
-  const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS;
   const root = rootPath
     ? objects.find((object) => stringValue(object.path)?.toLowerCase() === rootPath.toLowerCase())
     : undefined;
@@ -513,9 +530,23 @@ function selectHierarchyObjects(
     return !filter || matchesFilter(object, filter, match);
   });
 
-  if (options.componentType || options.propertyNames?.length) {
-    matches = matches.map((object) => projectMatchingComponents(object, options.componentType, options.propertyNames));
+  if (options.componentType || options.propertyNames?.length || options.componentDetails === "identity") {
+    matches = matches.map((object) => projectMatchingComponents(object, options.componentType, options.propertyNames, options.componentDetails));
   }
+
+  return matches;
+}
+
+function selectHierarchyObjects(
+  objects: Array<Record<string, unknown>>,
+  filter: string | undefined,
+  options: ProjectStateQueryOptions
+): { items: Array<Record<string, unknown>>; summary: QuerySummary } {
+  const match = options.match ?? "contains";
+  const rootPath = normalizeObjectPath(options.rootPath);
+  const includeDescendants = options.includeDescendants === true;
+  const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS;
+  const matches = matchingHierarchyObjects(objects, filter, options);
 
   const totalMatches = matches.length;
   const fields = options.fields ? Array.from(new Set(options.fields)) : undefined;
@@ -539,6 +570,7 @@ function selectHierarchyObjects(
       fields,
       componentType: options.componentType,
       propertyNames: options.propertyNames,
+      componentDetails: options.componentDetails,
       maxResponseBytes: bounded.maxResponseBytes,
       responseBytes: bounded.responseBytes,
     },
@@ -548,7 +580,8 @@ function selectHierarchyObjects(
 function projectMatchingComponents(
   object: Record<string, unknown>,
   componentType: string | undefined,
-  propertyNames: string[] | undefined
+  propertyNames: string[] | undefined,
+  componentDetails?: "identity" | "properties"
 ): Record<string, unknown> {
   let components = Array.isArray(object.components)
     ? object.components.filter(isRecord)
@@ -556,27 +589,36 @@ function projectMatchingComponents(
   if (componentType) {
     components = components.filter((component) => componentMatchesType(component, componentType));
   }
-  if (propertyNames?.length) {
-    components = components.map((component) => projectComponentProperties(component, propertyNames));
-  }
+  components = components.map((component) => projectComponent(component, propertyNames, componentDetails));
   return { ...object, components };
 }
 
-function projectComponentProperties(
+function projectComponent(
   component: Record<string, unknown>,
-  propertyNames: string[]
+  propertyNames?: string[],
+  componentDetails?: "identity" | "properties"
 ): Record<string, unknown> {
-  if (!Array.isArray(component.properties)) return component;
-  const requested = new Set(propertyNames);
+  if (componentDetails === "identity") {
+    return Object.fromEntries(Object.entries(component).filter(([key]) => key !== "properties" && key !== "missingProperties"));
+  }
+  if (!propertyNames?.length) {
+    const result = { ...component };
+    if (Array.isArray(result.missingProperties) && !result.missingProperties.length) delete result.missingProperties;
+    return result;
+  }
+  const properties = Array.isArray(component.properties) ? component.properties.filter(isRecord) : [];
+  const matches = (property: Record<string, unknown>, name: string) =>
+    [property.name, property.propertyPath].some(value => typeof value === "string" && value.toLowerCase() === name.toLowerCase()) ||
+    // Older bridges expose renderer material aliases under the canonical summary name.
+    (property.name === "materials" && /^(MeshRenderer|SkinnedMeshRenderer|Renderer|ParticleSystemRenderer|LineRenderer|TrailRenderer)$/.test(String(component.type)) &&
+      ["m_materials", "sharedmaterials"].includes(name.toLowerCase()));
+  const selected = properties.filter(property => propertyNames.some(name => matches(property, name)));
+  const missing = Array.from(new Set(propertyNames.filter(name => !selected.some(property => matches(property, name)))));
+  const { missingProperties: _previous, ...rest } = component;
   return {
-    ...component,
-    properties: component.properties.filter((property) => {
-      if (!isRecord(property)) return false;
-      const name = stringValue(property.name);
-      const propertyPath = stringValue(property.propertyPath);
-      return (name !== undefined && requested.has(name)) ||
-        (propertyPath !== undefined && requested.has(propertyPath));
-    }),
+    ...rest,
+    properties: selected,
+    ...(missing.length ? { missingProperties: missing } : {}),
   };
 }
 
@@ -597,20 +639,19 @@ function matchesFilter(
   match: ProjectStateMatchMode
 ): boolean {
   const filterLower = filter.toLowerCase();
-  if (match === "contains") {
-    return JSON.stringify(item).toLowerCase().includes(filterLower);
-  }
-
   const candidates = [item.name, item.path, item.type, item.fullType, item.objectName, item.objectPath]
     .filter((value): value is string => typeof value === "string");
-  if (candidates.some((value) => value.toLowerCase() === filterLower)) {
-    return true;
+  if (Array.isArray(item.components)) {
+    for (const component of item.components.filter(isRecord)) {
+      const type = stringValue(component.type);
+      const fullType = stringValue(component.fullType);
+      if (type !== undefined) candidates.push(type);
+      if (fullType !== undefined) candidates.push(fullType);
+    }
   }
-
-  return Array.isArray(item.components) && item.components.filter(isRecord).some((component) =>
-    stringValue(component.type)?.toLowerCase() === filterLower ||
-    stringValue(component.fullType)?.toLowerCase() === filterLower
-  );
+  return candidates.some((value) => match === "exact"
+    ? value.toLowerCase() === filterLower
+    : value.toLowerCase().includes(filterLower));
 }
 
 function pickFields(item: Record<string, unknown>, fields: string[]): Record<string, unknown> {
@@ -619,6 +660,10 @@ function pickFields(item: Record<string, unknown>, fields: string[]): Record<str
     if (Object.prototype.hasOwnProperty.call(item, field)) {
       result[field] = item[field];
     }
+  }
+  // A field projection must not hide missing requested-property evidence.
+  if (Array.isArray(item.missingProperties) && item.missingProperties.length) {
+    result.missingProperties = item.missingProperties;
   }
   return result;
 }
@@ -651,41 +696,53 @@ function boundItemsByBytes(
   };
 }
 
+function boundQueryResult(result: ProjectStateResult): ProjectStateResult {
+  if (!result.success || !result.query) return result;
+  const summary = result.query;
+  const hierarchy = !Array.isArray(result.data) && isRecord(result.data) ? result.data : undefined;
+  const items = (hierarchy ? hierarchy.objects : result.data) as Array<Record<string, unknown>>;
+  const alreadyTruncated = summary.truncated;
+  const originalWarning = result.warning;
+
+  // Budget the exact compact tool text, including metadata and its own byte count.
+  const measure = (count: number): number => {
+    const selected = items.slice(0, count);
+    if (hierarchy) hierarchy.objects = selected;
+    else result.data = selected;
+    summary.returned = count;
+    summary.truncated = alreadyTruncated || count < items.length;
+    result.warning = count === 0 && summary.truncated
+      ? [originalWarning, "No complete item fits the response budget. Narrow fields/propertyNames or increase maxResponseBytes."].filter(Boolean).join(" ")
+      : originalWarning;
+    summary.responseBytes = 0;
+    let bytes = Buffer.byteLength(JSON.stringify(result), "utf8");
+    while (summary.responseBytes !== bytes) {
+      summary.responseBytes = bytes;
+      bytes = Buffer.byteLength(JSON.stringify(result), "utf8");
+    }
+    return bytes;
+  };
+
+  if (measure(items.length) <= summary.maxResponseBytes) return result;
+  if (measure(0) > summary.maxResponseBytes) {
+    return { success: false, error: "Query metadata exceeds maxResponseBytes. Shorten the query options or increase the budget." };
+  }
+  let low = 0;
+  let high = items.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (measure(middle) <= summary.maxResponseBytes) low = middle;
+    else high = middle - 1;
+  }
+  measure(low);
+  return result;
+}
+
 function normalizeObjectPath(value: string | undefined): string | undefined {
   if (!value) {
     return undefined;
   }
   return value.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-}
-
-function readAllState(config: BanterMCPConfig, refresh: RefreshResult): ProjectStateResult {
-  const files = [
-    "scene-hierarchy.json",
-    "editor-state.json",
-    "console-log.json",
-    "import-status.json",
-    "compilation-status.json",
-    "prefab-catalog.json",
-  ];
-  const result: Record<string, unknown> = {};
-
-  for (const file of files) {
-    const fileResult = readStateFile(
-      config,
-      file,
-      file === "scene-hierarchy.json" ? refresh : { requested: false, refreshed: false }
-    );
-    const key = file.replace(".json", "").replace(/-/g, "_");
-    result[key] = fileResult.success ? fileResult.data : { error: fileResult.error };
-  }
-
-  const hierarchy = readJsonFile(path.join(config.mcpStatePath, "scene-hierarchy.json"));
-  return {
-    success: true,
-    data: result,
-    warning: refresh.error,
-    snapshot: buildSnapshotInfo(config, hierarchy, refresh),
-  };
 }
 
 function readComponentsFromHierarchy(
@@ -700,15 +757,14 @@ function readComponentsFromHierarchy(
   }
 
   const hierarchy = hierarchyResult.data as { objects?: Array<Record<string, unknown>> };
-  const selectedObjects = selectHierarchyObjects(hierarchy.objects || [], undefined, {
+  const selectedObjects = matchingHierarchyObjects(hierarchy.objects || [], undefined, {
     ...options,
     fields: undefined,
     componentType: undefined,
-    maxResults: Math.max(1, hierarchy.objects?.length || 0),
   });
   let components: Array<Record<string, unknown>> = [];
 
-  for (const object of selectedObjects.items) {
+  for (const object of selectedObjects) {
     const objectComponents = Array.isArray(object.components) ? object.components : [];
     for (const component of objectComponents.filter(isRecord)) {
       components.push({
@@ -740,132 +796,22 @@ function readComponentsFromHierarchy(
     ...hierarchyResult,
     data: items,
     query: {
-      ...selectedObjects.summary,
       totalMatches,
       returned: items.length,
       truncated: totalMatches > projectedItems.length || bounded.truncated,
+      match: options.match ?? "contains",
+      rootPath: normalizeObjectPath(options.rootPath),
+      includeDescendants: options.includeDescendants === true,
+      maxDepth: options.maxDepth,
+      maxResults,
       fields,
       componentType: options.componentType,
       propertyNames: options.propertyNames,
+      componentDetails: options.componentDetails,
       maxResponseBytes: bounded.maxResponseBytes,
       responseBytes: bounded.responseBytes,
     },
   };
-}
-
-function readPrefabCatalog(
-  config: BanterMCPConfig,
-  filter?: string
-): ProjectStateResult {
-  const catalogPath = path.join(config.mcpStatePath, "prefab-catalog.json");
-
-  if (fs.existsSync(catalogPath)) {
-    const data = JSON.parse(fs.readFileSync(catalogPath, "utf-8"));
-    return {
-      success: true,
-      data: filter ? applySimpleFilter(flattenPrefabCatalog(data), filter) : data,
-      source: catalogPath,
-    };
-  }
-
-  const prefabs = scanAssets(config.assetsPath, [".prefab"], filter);
-  return {
-    success: true,
-    data: {
-      generatedBy: "filesystem-scan",
-      totalCount: prefabs.length,
-      prefabs,
-    },
-    source: config.assetsPath,
-  };
-}
-
-function readAssets(
-  config: BanterMCPConfig,
-  filter?: string
-): ProjectStateResult {
-  const assets = scanAssets(config.assetsPath, undefined, filter);
-  return {
-    success: true,
-    data: {
-      totalCount: assets.length,
-      assets,
-    },
-    source: config.assetsPath,
-  };
-}
-
-function flattenPrefabCatalog(data: unknown): Array<Record<string, unknown>> {
-  const catalog = data as {
-    categories?: Record<string, { prefabs?: Array<Record<string, unknown>> }>;
-  };
-  const prefabs: Array<Record<string, unknown>> = [];
-
-  for (const category of Object.values(catalog.categories || {})) {
-    prefabs.push(...(category.prefabs || []));
-  }
-
-  return prefabs;
-}
-
-function scanAssets(
-  assetsPath: string,
-  extensions?: string[],
-  filter?: string
-): Array<Record<string, unknown>> {
-  const results: Array<Record<string, unknown>> = [];
-  const ignoredDirs = new Set(["Library", "Temp", "Logs", "obj", "bin"]);
-  const maxResults = 2000;
-
-  function walk(dir: string): void {
-    if (results.length >= maxResults) {
-      return;
-    }
-
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (results.length >= maxResults) {
-        return;
-      }
-
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!ignoredDirs.has(entry.name)) {
-          walk(fullPath);
-        }
-        continue;
-      }
-
-      if (entry.name.endsWith(".meta")) {
-        continue;
-      }
-
-      const ext = path.extname(entry.name).toLowerCase();
-      if (extensions && !extensions.includes(ext)) {
-        continue;
-      }
-
-      const relativePath = path.relative(assetsPath, fullPath).replace(/\\/g, "/");
-      if (filter && !relativePath.toLowerCase().includes(filter.toLowerCase())) {
-        continue;
-      }
-
-      results.push({
-        name: entry.name,
-        path: `Assets/${relativePath}`,
-        extension: ext,
-      });
-    }
-  }
-
-  walk(assetsPath);
-  return results;
-}
-
-function applySimpleFilter(data: unknown, filter: string): unknown {
-  const filterLower = filter.toLowerCase();
-  return Array.isArray(data)
-    ? data.filter((item) => JSON.stringify(item).toLowerCase().includes(filterLower))
-    : data;
 }
 
 async function requestStateExport(
