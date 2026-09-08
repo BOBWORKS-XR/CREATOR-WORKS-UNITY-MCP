@@ -2,7 +2,7 @@ let config = {
   channels: [],
   active_channel_id: null,
   mcp_server_path: '',
-  tool_groups: 'all',
+  tool_groups: 'core',
   auto_start: true,
   enable_custom_scripts: false
 };
@@ -216,7 +216,7 @@ async function refreshOnboardingStatus() {
 
 function updateUI() {
   elements.mcpServerPath.value = config.mcp_server_path || '';
-  const toolGroups = config.tool_groups || 'all';
+  const toolGroups = config.tool_groups || 'core';
   let option = Array.from(elements.toolGroups.options).find(function(item) {
     return item.value === toolGroups;
   });
@@ -334,7 +334,7 @@ async function runQuickSetup() {
       configureClaude: elements.connectClaude.checked,
       configureAntigravity: elements.connectAntigravity.checked,
       configureOpencode: elements.connectOpenCode.checked,
-      toolGroups: config.tool_groups || 'all',
+      toolGroups: config.tool_groups || 'core',
       enableCustomScripts: config.enable_custom_scripts === true
     });
     await refreshAll();
@@ -502,7 +502,7 @@ async function updateCodexConfig(channel) {
   await window.__TAURI__.core.invoke('update_codex_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
-    toolGroups: config.tool_groups || 'all'
+    toolGroups: config.tool_groups || 'core'
   });
 }
 
@@ -510,7 +510,7 @@ async function updateClaudeConfig(channel) {
   await window.__TAURI__.core.invoke('update_claude_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
-    toolGroups: config.tool_groups || 'all'
+    toolGroups: config.tool_groups || 'core'
   });
 }
 
@@ -518,7 +518,7 @@ async function updateAntigravityConfig(channel) {
   await window.__TAURI__.core.invoke('update_antigravity_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
-    toolGroups: config.tool_groups || 'all'
+    toolGroups: config.tool_groups || 'core'
   });
 }
 
@@ -526,7 +526,7 @@ async function updateOpenCodeConfig(channel) {
   await window.__TAURI__.core.invoke('update_opencode_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
-    toolGroups: config.tool_groups || 'all'
+    toolGroups: config.tool_groups || 'core'
   });
 }
 

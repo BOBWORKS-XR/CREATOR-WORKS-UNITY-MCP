@@ -141,12 +141,15 @@ struct SetupResult {
 }
 
 fn default_tool_groups() -> String {
-    "all".to_string()
+    "core".to_string()
 }
 
 fn normalize_tool_groups(value: &str) -> Result<String, String> {
     let value = value.trim().to_ascii_lowercase();
-    if value.is_empty() || value == "all" {
+    if value.is_empty() {
+        return Ok(default_tool_groups());
+    }
+    if value == "all" {
         return Ok("all".to_string());
     }
 
@@ -160,7 +163,7 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
 
     if entries.is_empty() {
         return Err(
-            "Tool groups must contain all, none, read, author, test, banter, or shadergraph"
+            "Tool groups must contain all, none, core, read, author, test, banter, or shadergraph"
                 .to_string(),
         );
     }
@@ -172,7 +175,7 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
         return Ok(entries[0].to_string());
     }
 
-    const KNOWN_GROUPS: [&str; 5] = ["read", "author", "test", "banter", "shadergraph"];
+    const KNOWN_GROUPS: [&str; 6] = ["core", "read", "author", "test", "banter", "shadergraph"];
     let unknown: Vec<&str> = entries
         .iter()
         .copied()
@@ -180,7 +183,7 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
         .collect();
     if !unknown.is_empty() {
         return Err(format!(
-            "Unknown tool groups: {}. Use all, none, read, author, test, banter, or shadergraph",
+            "Unknown tool groups: {}. Use all, none, core, read, author, test, banter, or shadergraph",
             unknown.join(", ")
         ));
     }
@@ -2211,7 +2214,8 @@ mod tests {
 
     #[test]
     fn tool_groups_are_normalized_and_fail_closed() {
-        assert_eq!(normalize_tool_groups(""), Ok("all".to_string()));
+        assert_eq!(normalize_tool_groups(""), Ok("core".to_string()));
+        assert_eq!(normalize_tool_groups("core"), Ok("core".to_string()));
         assert_eq!(
             normalize_tool_groups("banter, read,banter"),
             Ok("read,banter".to_string())

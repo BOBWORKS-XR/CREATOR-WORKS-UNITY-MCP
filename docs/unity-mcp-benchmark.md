@@ -1,6 +1,6 @@
 # Unity MCP Benchmark and Roadmap
 
-Reviewed: 2026-07-14
+Reviewed: 2026-09-08
 
 This benchmark is used to choose engineering work, not to make an unsupported
 "best Unity MCP" claim. Creator Works MCP should lead on deterministic local Unity
@@ -22,16 +22,19 @@ remote-control server, or an arbitrary C# execution endpoint.
 
 ## External Benchmarks
 
-| Project | Useful strengths | Decision for BANTWORKS |
+| Project | Useful strengths | Decision for Creator Works |
 |---------|------------------|------------------------|
-| [CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-mcp) | Mature releases, focused tool groups, tests, screenshots, package/script workflows, and documented multi-instance routing | Use as the maturity and workflow benchmark. Reimplement selected ideas against the local file bridge; do not copy source or add HTTP by default. |
+| [CoplayDev/unity-mcp](https://github.com/CoplayDev/unity-mcp) | Mature releases, a core-by-default tool surface, optional tool groups, tests, screenshots, package/script workflows, and documented multi-instance routing | Use as the maturity and workflow benchmark. Creator Works independently uses static startup profiles; do not copy source or add HTTP by default. |
 | [CoderGamester/mcp-unity](https://github.com/CoderGamester/mcp-unity) | Project-local client configuration, detailed resources, Unity Test Runner access, package operations, and batch rollback options | Adopt portable project configuration, test discovery/execution, and preflight/rollback concepts after the core identity contract is stable. |
 | [ozankasikci/unity-editor-mcp](https://github.com/ozankasikci/unity-editor-mcp) | Broad scene/prefab analysis, Play Mode control, screenshots, references, and editor diagnostics | Use as a coverage checklist. Avoid copying a large tool count without focused schemas and verification. |
+| [Unity CLI and Pipeline](https://github.com/Unity-Technologies/skills/blob/main/skills/unity-cli/references/integration-advanced.md) | Official Unity MCP server, project targeting, compact command discovery, and documented project-side custom commands | Treat an optional, allow-listed Pipeline adapter as the preferred interoperability path. Do not use undocumented Assistant internals. |
 
-All three repositories identify as MIT-licensed. No code, assets, or generated
-data from them is included here. See `THIRD_PARTY_NOTICES.md`.
+The three community repositories identify as MIT-licensed. Unity's official
+documentation is cited as a platform contract, not as permissively licensed
+source. No code, assets, schemas, or generated data from these projects is
+included here. See `THIRD_PARTY_NOTICES.md`.
 
-## Current BANTWORKS Position
+## Current Creator Works Position
 
 Strong today:
 
@@ -48,6 +51,11 @@ Strong today:
 - Codex and Claude Code launcher configuration;
 - focused scene, component, prefab, bounds, console, and import tools;
 - read-only bridge health diagnostics;
+- a 24-tool token-saver profile selected by default for new setup configurations,
+  with schema-size regression tests and an exact measurement command;
+- a 64 KiB default final hierarchy/component response budget with explicit opt-up;
+- bounded SideQuest custom-node lookup that avoids loading the complete catalog
+  for normal Visual Scripting work;
 - Banter component, JavaScript, and Visual Scripting resources;
 - evidence-linked Banter workflows for synced objects, interaction, UI, audio,
   networking, and WebRoot behavior, with catalogue/tool drift tests; and
@@ -64,7 +72,7 @@ Gaps that block a leadership claim:
   patch of three Banter SDK 3.x minor lines rather than a Unity-version matrix.
 
 Compatibility limit: Test Framework 1.1 supports discovery and execution but
-does not expose public cancellation. BANTWORKS fails with a capability error
+does not expose public cancellation. Creator Works fails with a capability error
 instead of modifying internal runner state. Test Framework 1.6 and newer uses
 its public cancellation API.
 
@@ -126,13 +134,32 @@ its public cancellation API.
    machine-specific source paths, isolated bundle smoke, NSIS/MSI release
    targets, and draft GitHub release automation.
 2. Project-local client configuration option and migration tooling.
-3. **Complete:** composable `read`, `author`, `test`, and `banter` capability
+3. **Complete:** composable `core`, `read`, `author`, `test`, and `banter` capability
    groups, routing-only mode, tools/list filtering, direct-call enforcement,
-   fail-closed parsing, and Codex/Claude launcher profiles.
+   fail-closed parsing, schema budget tests, and client launcher profiles.
 4. **Complete (initial matrix):** document exercised Unity, Banter SDK, Visual
    Scripting, Test Framework, Node, client, and Windows distribution surfaces.
    Generic asset-reference and public Banter release rows now have repeatable
    local fixtures; hosted Unity CI and a multi-editor matrix remain.
+
+### P3 - Planned Interoperability and Creator Workflow
+
+1. Test the existing stdio server through documented Assistant MCP Extensions
+   before building an adapter. Assistant 2.19 docs describe this route but mark
+   older Unity MCP tooling deprecated in favor of CLI. Separately evaluate an
+   optional Pipeline `[CliCommand]` adapter only if it adds measurable value.
+   Live Creator Works interoperability is not yet verified; see the dated
+   primary sources in `future-roadmap.md`. Do not use internal Assistant APIs.
+2. Build a preview-first Creator SDK bootstrapper that detects the project and
+   Unity version, pins an explicit package version, backs up manifest/lock data,
+   waits for compilation, and runs the installed SDK validator.
+3. Add optimistic concurrency for mixed manual and MCP editing: fresh scene
+   revisions and object fingerprints on mutation commands, conflict responses
+   on stale preconditions, and Undo groups scoped only to the command's own
+   changes. Never restore a whole scene from an earlier MCP snapshot.
+4. Last: build a deterministic local player-interaction harness for spawn,
+   movement, grabbing, held events, triggers, and ownership approximations.
+   Keep it separate from hosted-client, Quest, and multiplayer acceptance.
 
 ## Release Gate
 

@@ -19,7 +19,7 @@ $SmokeLog = Join-Path $TempRoot ("bantworks-unity-asset-reference-" + $FixtureId
 
 function Invoke-Unity([string[]]$Arguments, [string]$LogPath) {
     $process = Start-Process -FilePath $UnityEditorPath -ArgumentList $Arguments `
-        -PassThru -NoNewWindow
+        -PassThru -WindowStyle Hidden
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) {
         $tail = if (Test-Path -LiteralPath $LogPath) {
@@ -57,6 +57,8 @@ try {
         -Destination (Join-Path $EditorPath "BanterMCPBridge.cs") -Force
     Copy-Item -LiteralPath (Join-Path $RepoRoot "unity-extension\Editor\CreatorWorksMCPLogo.png") `
         -Destination (Join-Path $EditorPath "CreatorWorksMCPLogo.png") -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "fixtures\HierarchyQuerySmoke.cs") `
+        -Destination (Join-Path $EditorPath "HierarchyQuerySmoke.cs") -Force
 
     $FixtureAssetSource = @'
 using UnityEngine;
@@ -77,6 +79,7 @@ public sealed class FixtureComponent : MonoBehaviour
 {
     public FixtureAsset asset;
     public int count;
+    public string label;
 }
 '@
     [System.IO.File]::WriteAllText(
@@ -193,6 +196,7 @@ namespace BantworksMCPFixture
             Assert(component.asset == fixture, "Wrong-property failure changed the existing reference");
 
             RunVisualScriptingAttachment(target);
+            HierarchyQuerySmoke.Run();
         }
 
         private static void RunVisualScriptingAttachment(GameObject target)

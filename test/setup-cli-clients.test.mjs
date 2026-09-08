@@ -17,8 +17,31 @@ import {
   applyToOpenCode,
   configPathFor,
   loadConfig,
+  normalizeToolGroups,
 } from "../scripts/cli/setup-lib.mjs";
 import { parseJsonc } from "../scripts/cli/jsonc-edit.mjs";
+
+test("cross-platform setup defaults new configurations to the core tool profile", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "creator-works-cli-default-"));
+  try {
+    const configRoot = path.join(root, "config");
+    const mcpRoot = path.join(root, "mcp");
+    mkdirSync(mcpRoot, { recursive: true });
+    writeFileSync(path.join(mcpRoot, "creator-works-mcp.mjs"), "// server\n", "utf8");
+
+    const config = loadConfig({ configRoot, mcpRoot });
+    assert.equal(config.tool_groups, "core");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("tool profile normalization accepts compact profiles and whitespace defaults", () => {
+  assert.equal(normalizeToolGroups(undefined), "core");
+  assert.equal(normalizeToolGroups("   "), "core");
+  assert.equal(normalizeToolGroups("shadergraph, core,shadergraph"), "core,shadergraph");
+  assert.throws(() => normalizeToolGroups("all,core"), /cannot combine/i);
+});
 
 test("cross-platform CLI writes canonical client entries and preserves unrelated config", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "creator-works-cli-clients-"));

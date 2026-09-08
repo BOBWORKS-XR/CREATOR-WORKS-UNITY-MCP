@@ -17,6 +17,7 @@ Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other 
 - **Native Visual Scripting:** generates, validates, writes, imports, and checks Unity Visual Scripting graphs using a source-observed custom-node catalogue and SDK validator
 - **Experimental Shader Graph tooling:** inspects real nodes, slots, and targets, uses content hashes for concurrency, protects occupied inputs, and verifies rollback after failed writes
 - **Testing and diagnostics:** exposes compiler status, filtered Console logs, Unity Test Framework runs, screenshots, import status, package metadata, and bounded hierarchy queries
+- **Token-aware setup:** new installations expose a compact 24-tool core profile, with specialist capabilities available as opt-in profiles
 - **Low-overhead local bridge:** keeps command polling responsive without repeatedly serializing an unchanged scene hierarchy
 
 ## Quick Start
@@ -62,13 +63,59 @@ The Visual Scripting workflow is closed-loop:
 6. Run the installed SideQuest SDK validator when available.
 7. Exercise the behavior in the target Unity and hosted client.
 
-The bundled reference includes the Unity Visual Scripting JSON manual v2.2, source-observed compatibility corrections, and an extracted custom-node catalogue with serialized defaults and provenance.
+The bundled reference includes the Unity Visual Scripting JSON manual v2.2, source-observed compatibility corrections, and an extracted custom-node catalogue with serialized defaults and provenance. Normal requests use the bounded `search_sidequest_vs_nodes` tool; the complete catalog resource remains available for explicitly requested exhaustive audits.
 
 ## Bridge Performance
 
 Automatic full-scene state export is disabled by default in both Edit and Play mode. The bridge keeps lightweight status and command polling active, while explicit **Creator Works MCP > Refresh State** and `export-state` requests still produce a full snapshot when needed.
 
 Targeted hierarchy queries serialize only the requested subtree or matching components. Unity object traversal remains on Unity's main thread; the bridge does not use background threads to access Unity objects.
+
+## Token Use
+
+This section describes the unreleased token-optimization source branch, not the
+published 2.5.1 installer. Installation and large-project acceptance are pending.
+
+New launcher and setup configurations default to the `core` profile. It exposes
+24 general inspection and scene-authoring tools instead of all 52 schemas.
+Current source measurement is 21,425 schema bytes for `core` versus 46,866 for
+`all`, a 54% reduction before the user's prompt or any tool result is counted.
+Actual tokens vary by MCP client and model; run `npm run measure:context` for the
+current byte counts, on-demand resource sizes, and rough estimates.
+
+Hierarchy and component results default to a 64 KiB compact response-text budget,
+including metadata. `query.responseBytes` reports the actual UTF-8 text size.
+The previous default was 512 KiB for item data alone. A caller can explicitly request up to 4 MiB when a large result is
+actually required. Asset and prefab discovery use their dedicated bounded tools.
+Filtering and field projection happen before limiting the returned items. An
+oversized individual item reports truncation and suggests a narrower projection.
+Hierarchy text filters search only object and component identity fields; hidden
+serialized property values cannot create unexplained matches. Filtered live
+reads use the correlated targeted-query path rather than a full-state export.
+SideQuest node lookup returns 10 matches by default and has a hard cap of 25,
+so graph work does not need to ingest the complete custom-node catalog.
+
+`get_mcp_reference` searches the bundled manual, component, JavaScript, and
+workflow references without sending entire documents. Results include explicit
+continuations and source revisions; manual replies always include the correction
+guide. This is available in Full, Inspection, Unity authoring, and Banter profiles.
+The original complete references remain available on explicit request.
+
+Console, import, compiler, and prefab replies also default to 64 KiB of compact
+result text. Complete entries are retained, omissions and original counts are
+reported, and compilation failure/freshness metadata is preserved. Callers can
+filter, raise the budget up to 4 MiB, or inspect the named local snapshot files.
+
+Profiles reduce the exposed tool set; they are not lossless schema compression.
+Choose Full when every operation must remain immediately available, while still
+benefiting from focused references and bounded reads. See the
+[options and next phase](docs/token-optimization-next-phase.md) and
+[review evidence](docs/token-optimization-review-2026-09-08.md).
+
+Existing saved `all` selections are preserved. Changing the profile updates
+client configuration, so restart an already-running MCP client afterward. A
+server started manually without `CREATOR_WORKS_TOOL_GROUPS` still exposes `all`
+for backward compatibility.
 
 ## MCP Clients
 
@@ -83,12 +130,12 @@ tool_timeout_sec = 600
 
 [mcp_servers.creator-works.env]
 UNITY_PROJECT_PATH = "E:/unity/MyProject"
-CREATOR_WORKS_TOOL_GROUPS = "all"
+CREATOR_WORKS_TOOL_GROUPS = "core"
 ```
 
 The standalone ZIP requires Node.js 20 or newer. The Windows setup executable includes the private runtime.
 
-Tool profiles can expose `read`, `author`, `test`, `banter`, `shadergraph`, a comma-separated combination, `all`, or `none` for routing and health only.
+Tool profiles can expose `core`, `read`, `author`, `test`, `banter`, `shadergraph`, a comma-separated combination, `all`, or `none` for routing and health only.
 
 ## Manual Bridge Installation
 
@@ -137,6 +184,7 @@ These project screenshots show scene hierarchy construction, configured Banter c
 - [Banter custom Visual Scripting nodes](docs/banter-custom-visual-scripting-nodes.md)
 - [SideQuest workflows](docs/banter-workflows.md)
 - [Unity MCP benchmark](docs/unity-mcp-benchmark.md)
+- [Future roadmap](docs/future-roadmap.md)
 - [Creator/Banter SDK transition](docs/sidequest-sdk-transition.md)
 - [Shader Graph experiment](docs/shader-graph-experiment.md)
 
@@ -151,6 +199,7 @@ git clone https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP.git
 Set-Location CREATOR-WORKS-UNITY-MCP
 npm ci
 npm test
+npm run measure:context
 Set-Location launcher/src-tauri
 cargo test
 ```

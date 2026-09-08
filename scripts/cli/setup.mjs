@@ -8,7 +8,7 @@
 //   list-projects       Print configured projects
 //   set-active          Set the active Unity project
 //   remove-project      Remove a Unity project from the launcher config
-//   set-profile <name>  Set the capability profile (all|none|read,author,test,banter)
+//   set-profile <name>  Set the capability profile (all|none|core,read,author,test,banter,shadergraph)
 //   apply-claude        Apply the active project to Claude Code (~/.claude.json)
 //   apply-codex         Apply the active project to Codex (~/.codex/config.toml)
 //   install-bridge      Install the Unity editor extension into the active project
@@ -45,7 +45,7 @@ Subcommands:
   list-projects                        Print configured projects
   set-active <index>                   Set the active Unity project (1-based index)
   remove-project <index>               Remove a Unity project (1-based index)
-  set-profile <name>                   Set the capability profile (all|none|read,author,test,banter)
+  set-profile <name>                   Set the capability profile (all|none|core,read,author,test,banter,shadergraph)
   apply-claude                         Apply to Claude Code
   apply-codex                          Apply to Codex
   apply-antigravity                    Apply to Antigravity

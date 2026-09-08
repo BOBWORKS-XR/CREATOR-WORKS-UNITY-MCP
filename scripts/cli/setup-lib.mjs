@@ -24,7 +24,7 @@ import { updateJsoncManagedEntry } from "./jsonc-edit.mjs";
 
 export const LEGACY_SERVER_PATH = "C:/tools/banter-mcp/dist/index.js";
 
-export const KNOWN_TOOL_GROUPS = ["read", "author", "test", "banter"];
+export const KNOWN_TOOL_GROUPS = ["core", "read", "author", "test", "banter", "shadergraph"];
 const MCP_CLIENT_ID = "creator-works";
 const LEGACY_MCP_CLIENT_ID = "banter";
 const TOOL_GROUPS_ENV = "CREATOR_WORKS_TOOL_GROUPS";
@@ -75,8 +75,8 @@ export function isLegacyServerPath(value) {
 }
 
 export function normalizeToolGroups(value) {
-  if (value === undefined || value === null || value === "") {
-    return "all";
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return "core";
   }
   const entries = String(value)
     .toLowerCase()
@@ -85,7 +85,7 @@ export function normalizeToolGroups(value) {
     .filter((entry) => entry.length > 0);
   const unique = [...new Set(entries)];
   if (unique.length === 0) {
-    throw new Error("Tool groups must contain all, none, read, author, test, or banter.");
+    throw new Error("Tool groups must contain all, none, core, read, author, test, banter, or shadergraph.");
   }
   if (unique.includes("all") || unique.includes("none")) {
     if (unique.length !== 1) {
@@ -96,7 +96,7 @@ export function normalizeToolGroups(value) {
   const unknown = unique.filter((entry) => !KNOWN_TOOL_GROUPS.includes(entry));
   if (unknown.length > 0) {
     throw new Error(
-      `Unknown tool groups: ${unknown.join(", ")}. Use all, none, read, author, test, or banter.`,
+      `Unknown tool groups: ${unknown.join(", ")}. Use all, none, core, read, author, test, banter, or shadergraph.`,
     );
   }
   return KNOWN_TOOL_GROUPS.filter((group) => unique.includes(group)).join(",");
@@ -206,7 +206,7 @@ export function loadConfig({ configRoot, mcpRoot }) {
     channels: [],
     active_channel_id: null,
     mcp_server_path: defaultServerPath(mcpRoot),
-    tool_groups: "all",
+    tool_groups: "core",
     auto_start: false,
     enable_custom_scripts: false,
   };

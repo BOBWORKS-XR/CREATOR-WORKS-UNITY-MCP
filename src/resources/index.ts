@@ -63,7 +63,7 @@ invent an equivalent write path.
 When the user asks for something in their scene:
 
 1. **Detect the SDK contract** - Run \`get_banter_sdk_info\` and follow its \`sdkProfile\`, namespaces, and authoring policy
-2. **Choose a workflow** - Read \`banter://workflows\` for synced objects, interaction, UI, audio, networking, or WebRoot work; the URI is retained for compatibility
+2. **Choose a workflow** - Use \`get_mcp_reference\` with source \`workflows\` for the relevant domain; retrieve only its relevant evidence entries
 3. **Query first** - Use \`get_bridge_status\` and \`query_project_state\`
 4. **Create/modify** - Use the smallest applicable implementation path
 5. **Verify** - Apply the workflow's import, selected-SDK, console, and runtime gates
@@ -81,12 +81,13 @@ When the user asks for something in their scene:
 - \`generate_vs_graph\` - Create interaction logic
 - \`validate_vs_graph\` - Check for errors
 - \`write_vs_graph\` - Save to the project
-- Before creating Visual Scripting graphs, read \`banter://sdk-compatibility\`, \`banter://custom-vs-nodes\`, and \`banter://unity-vs-json-manual\`.
+- Before creating SideQuest Visual Scripting graphs, run \`get_banter_sdk_info\`, then use \`search_sidequest_vs_nodes\` for only the relevant node definitions.
+- Use \`get_mcp_reference\` with source \`manual\` for exact serialization rules and compatibility corrections. Reuse unchanged excerpts already in this task; continue partial entries when needed. Complete manual/catalog resources are for explicitly requested exhaustive audits.
 - Use real random GUIDs and canonical \`graph.elements\`. Referenced nodes need string \`$id\` values; connection \`$version\` may be omitted by Visual Scripting 1.9.x.
 - Run \`get_banter_sdk_info\` before relying on the full node catalogue because package families, git revisions, and registry packages with nearby versions can contain different node sets and namespaces.
 
 ### C# Authoring Boundary
-- BANTWORKS does not provide a tool that creates C# source files. The Custom Script Components setting only permits adding components from C# assemblies that the project has already compiled.
+- Creator Works does not provide a tool that creates C# source files. The Custom Script Components setting only permits adding components from C# assemblies that the project has already compiled.
 - When the requested runtime behavior belongs in Visual Scripting, use \`generate_vs_graph\`, \`validate_vs_graph\`, and \`write_vs_graph\`; do not create a project \`.cs\` file as a fallback.
 - An external coding workflow may temporarily need an \`Assets/Editor\` generator for Unity API work that the available tools cannot express. Treat that generator as project source while it is active. Never delete or archive it automatically, and do not leave one-shot revision or compatibility helpers compiling indefinitely after the user has approved their retirement and their generated assets have passed import, serialized read-back, SDK, and runtime checks.
 
@@ -155,7 +156,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
     {
       uri: "banter://components",
       name: "Banter Components",
-      description: "Source-checked legacy component catalogue, dynamically reconciled with the selected Creator SDK or Banter package",
+      description: "Large complete legacy component catalog; prefer get_mcp_reference source components and verify the selected SDK",
       mimeType: "application/json",
     },
     {
@@ -173,7 +174,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
     {
       uri: "banter://workflows",
       name: "SideQuest SDK Workflow Contracts",
-      description: "Evidence-linked workflows for synced objects, interaction, UI, audio, networking, and WebRoot across both SDK profiles",
+      description: "Complete workflow collection; prefer get_mcp_reference source workflows for one domain and its shared validation gates",
       mimeType: "application/json",
     },
     {
@@ -185,7 +186,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
     {
       uri: "banter://custom-vs-nodes",
       name: "Banter Custom Visual Scripting Nodes",
-      description: "Exact custom Banter Visual Scripting node catalog extracted from AllCustomNodes.asset",
+      description: "Large complete custom Banter node catalog; prefer search_sidequest_vs_nodes for bounded normal lookup",
       mimeType: "application/json",
     },
     {
@@ -209,7 +210,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
     {
       uri: "banter://unity-vs-json-manual",
       name: "Unity Visual Scripting JSON Manual",
-      description: "Complete Unity Visual Scripting JSON rules, pitfalls, and examples supplied by the user",
+      description: "Large complete manual; prefer get_mcp_reference source manual for focused sections plus compatibility corrections",
       mimeType: "text/markdown",
     },
     {
@@ -226,7 +227,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
       {
         uri: "project://state",
         name: "Project State",
-        description: "Current Unity scene hierarchy exported by the Unity bridge",
+        description: "Large raw Unity scene snapshot; prefer bounded query_project_state for normal inspection",
         mimeType: "application/json",
       },
       {
@@ -238,7 +239,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
       {
         uri: "project://console",
         name: "Console Logs",
-        description: "Recent Unity console output (logs, warnings, errors)",
+        description: "Raw Unity console snapshot; prefer bounded get_console_logs for normal diagnostics",
         mimeType: "application/json",
       },
       {
@@ -256,7 +257,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
       {
         uri: "project://prefab-catalog",
         name: "Prefab Catalog",
-        description: "Categorized prefab catalog exported by the Unity bridge",
+        description: "Raw prefab catalog; prefer bounded get_prefab_catalog for normal discovery",
         mimeType: "application/json",
       }
     );
@@ -296,6 +297,8 @@ export function handleResourceRead(
         environmentVariable: "CREATOR_WORKS_TOOL_GROUPS",
         legacyEnvironmentVariable: "BANTWORKS_TOOL_GROUPS",
         default: "all",
+        serverDefaultWhenUnset: "all",
+        launcherDefault: "core",
         specialValues: {
           all: "Expose all tools",
           none: "Expose only project routing and bridge health tools",
@@ -305,11 +308,13 @@ export function handleResourceRead(
           TOOL_GROUP_NAMES.map((group) => [group, [...TOOL_GROUP_MEMBERSHIP[group]]])
         ),
         launcherProfiles: {
+          tokenSaver: "core",
           full: "all",
           inspection: "read",
-          banterWorkflow: "read,author,banter",
-          unityAuthoring: "read,author",
-          testing: "read,test",
+          banterWorkflow: "core,banter",
+          shaderGraphPreview: "core,shadergraph",
+          unityAuthoring: "core,author",
+          testing: "core,test",
           minimalRouting: "none",
         },
       }, null, 2);

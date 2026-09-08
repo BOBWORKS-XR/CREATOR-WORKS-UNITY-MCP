@@ -43,6 +43,12 @@ test("launcher presents Creator Works as the AI-facing MCP identity", () => {
   assert.match(launcherSource, /const TOOL_GROUPS_ENV: &str = "CREATOR_WORKS_TOOL_GROUPS"/);
   assert.match(launcherSource, /LEGACY_MCP_CLIENT_ID/);
   assert.doesNotMatch(launcherHtml, /BANTWORKS MCP/);
+  assert.match(launcherHtml, /value="core">Token Saver \(recommended\)/);
+  assert.match(launcherHtml, /value="core,banter">Banter workflow/);
+  assert.match(launcherHtml, /value="core,shadergraph">Shader Graph preview/);
+  assert.match(launcherHtml, /value="core,author">Unity authoring/);
+  assert.match(launcherHtml, /value="core,test">Testing/);
+  assert.match(launcherApp, /tool_groups: 'core'/);
 });
 
 test("cross-platform standalone packaging uses Creator Works artifact names", () => {

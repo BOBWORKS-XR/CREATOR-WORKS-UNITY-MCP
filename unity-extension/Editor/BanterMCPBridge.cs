@@ -1667,9 +1667,10 @@ namespace BantworksMCP
                     throw new InvalidOperationException("maxResults must be between 1 and 5000");
                 if (string.IsNullOrWhiteSpace(cmd.rootPath) &&
                     string.IsNullOrWhiteSpace(cmd.componentType) &&
-                    !(cmd.match == "exact" && !string.IsNullOrWhiteSpace(cmd.filter)))
+                    string.IsNullOrWhiteSpace(cmd.filter) &&
+                    (cmd.propertyNames == null || cmd.propertyNames.Length == 0))
                 {
-                    throw new InvalidOperationException("Live hierarchy queries require rootPath or an exact filter/component type");
+                    throw new InvalidOperationException("Live hierarchy queries require rootPath, filter, componentType, or propertyNames");
                 }
 
                 var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
@@ -1698,10 +1699,9 @@ namespace BantworksMCP
 
                 foreach (HierarchyQueryCandidate candidate in candidates)
                 {
-                    bool containsFilter = !string.IsNullOrWhiteSpace(cmd.filter) && cmd.match == "contains";
                     bool needsComponentIdentities = cmd.queryKind == "components" ||
                         !string.IsNullOrWhiteSpace(cmd.componentType) ||
-                        (!string.IsNullOrWhiteSpace(cmd.filter) && cmd.match == "exact");
+                        !string.IsNullOrWhiteSpace(cmd.filter);
                     Component[] allComponents = needsComponentIdentities
                         ? candidate.gameObject.GetComponents<Component>().Where(component => component != null).ToArray()
                         : null;
@@ -1716,25 +1716,24 @@ namespace BantworksMCP
 
                     if (cmd.queryKind == "hierarchy")
                     {
-                        if (!containsFilter &&
-                            !MatchesHierarchyIdentityFilter(candidate.gameObject, allComponents, cmd.filter))
-                            continue;
-
-                        GameObjectInfo info = null;
-                        if (containsFilter || result.objects.Count < cmd.maxResults)
-                        {
-                            info = CreateGameObjectInfo(
-                                candidate.gameObject,
-                                candidate.depth,
-                                string.IsNullOrWhiteSpace(cmd.componentType) ? null : matchingComponents,
-                                cmd.propertyNames);
-                        }
-                        if (containsFilter && !MatchesHierarchyQueryFilter(info, cmd.filter))
+                        if (!MatchesHierarchyIdentityFilter(
+                            candidate.gameObject,
+                            allComponents,
+                            cmd.filter,
+                            cmd.match))
                             continue;
 
                         result.totalMatches++;
-                        if (info != null && result.objects.Count < cmd.maxResults)
-                            result.objects.Add(info);
+                        if (result.objects.Count < cmd.maxResults)
+                        {
+                            result.objects.Add(CreateGameObjectInfo(
+                                candidate.gameObject,
+                                candidate.depth,
+                                !cmd.includeComponents ? new Component[0] :
+                                    string.IsNullOrWhiteSpace(cmd.componentType) ? null : matchingComponents,
+                                cmd.propertyNames,
+                                cmd.includeComponentProperties));
+                        }
                         continue;
                     }
 
@@ -1743,14 +1742,18 @@ namespace BantworksMCP
                         : matchingComponents;
                     foreach (Component component in components)
                     {
-                        if (!containsFilter &&
-                            !MatchesComponentIdentityFilter(candidate.gameObject, component, cmd.filter))
+                        if (!MatchesComponentIdentityFilter(
+                            candidate.gameObject,
+                            component,
+                            cmd.filter,
+                            cmd.match))
                             continue;
 
                         result.totalMatches++;
-                        if (!containsFilter && result.components.Count >= cmd.maxResults)
+                        if (result.components.Count >= cmd.maxResults)
                             continue;
 
+                        var serialized = SerializeComponent(component, cmd.propertyNames, cmd.includeComponentProperties);
                         var info = new ComponentQueryInfo
                         {
                             objectName = candidate.gameObject.name,
@@ -1759,16 +1762,10 @@ namespace BantworksMCP
                             type = component.GetType().Name,
                             fullType = component.GetType().FullName,
                             globalObjectId = GetStableObjectId(component),
-                            properties = SerializeComponent(component, cmd.propertyNames).properties
+                            properties = serialized.properties,
+                            missingProperties = serialized.missingProperties
                         };
-                        if (containsFilter && !MatchesComponentQueryFilter(info, cmd.filter))
-                        {
-                            result.totalMatches--;
-                            continue;
-                        }
-
-                        if (result.components.Count < cmd.maxResults)
-                            result.components.Add(info);
+                        result.components.Add(info);
                     }
                 }
 
@@ -1841,40 +1838,41 @@ namespace BantworksMCP
         private static bool MatchesHierarchyIdentityFilter(
             GameObject gameObject,
             Component[] components,
-            string filter)
+            string filter,
+            string match)
         {
             if (string.IsNullOrWhiteSpace(filter))
                 return true;
 
-            return string.Equals(gameObject.name, filter, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(GetGameObjectPath(gameObject), filter, StringComparison.OrdinalIgnoreCase) ||
+            return IdentityTextMatches(gameObject.name, filter, match) ||
+                IdentityTextMatches(GetGameObjectPath(gameObject), filter, match) ||
                 (components != null && components.Any(component =>
-                    string.Equals(component.GetType().Name, filter, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(component.GetType().FullName, filter, StringComparison.OrdinalIgnoreCase)));
+                    IdentityTextMatches(component.GetType().Name, filter, match) ||
+                    IdentityTextMatches(component.GetType().FullName, filter, match)));
         }
 
         private static bool MatchesComponentIdentityFilter(
             GameObject gameObject,
             Component component,
-            string filter)
+            string filter,
+            string match)
         {
             if (string.IsNullOrWhiteSpace(filter))
                 return true;
 
-            return string.Equals(gameObject.name, filter, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(GetGameObjectPath(gameObject), filter, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(component.GetType().Name, filter, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(component.GetType().FullName, filter, StringComparison.OrdinalIgnoreCase);
+            return IdentityTextMatches(gameObject.name, filter, match) ||
+                IdentityTextMatches(GetGameObjectPath(gameObject), filter, match) ||
+                IdentityTextMatches(component.GetType().Name, filter, match) ||
+                IdentityTextMatches(component.GetType().FullName, filter, match);
         }
 
-        private static bool MatchesHierarchyQueryFilter(GameObjectInfo info, string filter)
+        private static bool IdentityTextMatches(string value, string filter, string match)
         {
-            return JsonUtility.ToJson(info).IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static bool MatchesComponentQueryFilter(ComponentQueryInfo info, string filter)
-        {
-            return JsonUtility.ToJson(info).IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+            if (string.IsNullOrEmpty(value))
+                return false;
+            return match == "exact"
+                ? string.Equals(value, filter, StringComparison.OrdinalIgnoreCase)
+                : value.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static void ExecuteEditorMenuItem(ExecuteEditorMenuItemCommand cmd)
@@ -5806,7 +5804,7 @@ namespace BantworksMCP
             }
         }
 
-        private static GameObjectInfo CreateGameObjectInfo(GameObject obj, int depth, Component[] includedComponents = null, string[] includedPropertyNames = null)
+        private static GameObjectInfo CreateGameObjectInfo(GameObject obj, int depth, Component[] includedComponents = null, string[] includedPropertyNames = null, bool includeComponentProperties = true)
         {
             var info = new GameObjectInfo
             {
@@ -5857,13 +5855,13 @@ namespace BantworksMCP
             {
                 if (comp != null)
                 {
-                    info.components.Add(SerializeComponent(comp, includedPropertyNames));
+                    info.components.Add(SerializeComponent(comp, includedPropertyNames, includeComponentProperties));
                 }
             }
             return info;
         }
 
-        private static ComponentInfo SerializeComponent(Component comp, string[] includedPropertyNames = null)
+        private static ComponentInfo SerializeComponent(Component comp, string[] includedPropertyNames = null, bool includeProperties = true)
         {
             var info = new ComponentInfo
             {
@@ -5872,10 +5870,48 @@ namespace BantworksMCP
                 globalObjectId = GetStableObjectId(comp),
                 properties = new List<PropertyInfo>()
             };
+            if (!includeProperties) return info;
+
+            string[] requested = includedPropertyNames == null ? new string[0] :
+                includedPropertyNames.Distinct(StringComparer.Ordinal).ToArray();
+            if (requested.Length > 0) info.missingProperties = new List<string>();
 
             try
             {
-                var so = new SerializedObject(comp);
+                using (var so = new SerializedObject(comp))
+                {
+                if (requested.Length > 0)
+                {
+                    foreach (string name in requested)
+                    {
+                        PropertyInfo value = null;
+                        if (comp is Renderer renderer)
+                        {
+                            if (string.Equals(name, "enabled", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(name, "m_Enabled", StringComparison.OrdinalIgnoreCase))
+                                value = new PropertyInfo { name = name, type = "Boolean", value = renderer.enabled ? "true" : "false" };
+                            else if (string.Equals(name, "materials", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(name, "sharedMaterials", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(name, "m_Materials", StringComparison.OrdinalIgnoreCase))
+                            {
+                                value = CreateRendererMaterialProperty(renderer);
+                                value.name = name;
+                            }
+                        }
+                        // FindProperty includes hidden and nested serialized fields skipped by NextVisible.
+                        if (value == null && name != "m_Script" && name != "m_ObjectHideFlags")
+                        {
+                            var selected = so.FindProperty(name);
+                            if (selected != null) value = new PropertyInfo {
+                                name = name, propertyPath = selected.propertyPath,
+                                type = selected.propertyType.ToString(), value = GetSerializedPropertyValue(selected)
+                            };
+                        }
+                        if (value == null) info.missingProperties.Add(name);
+                        else info.properties.Add(value);
+                    }
+                    return info;
+                }
                 var prop = so.GetIterator();
                 bool enterChildren = true;
 
@@ -5886,11 +5922,6 @@ namespace BantworksMCP
                     // Skip some internal properties
                     if (prop.name == "m_Script" || prop.name == "m_ObjectHideFlags")
                         continue;
-                    if (includedPropertyNames != null && includedPropertyNames.Length > 0 &&
-                        !includedPropertyNames.Any(name => string.Equals(name, prop.name, StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(name, prop.propertyPath, StringComparison.OrdinalIgnoreCase)))
-                        continue;
-
                     info.properties.Add(new PropertyInfo
                     {
                         name = prop.name,
@@ -5899,18 +5930,13 @@ namespace BantworksMCP
                     });
                 }
 
-                if (comp is Renderer renderer && includedPropertyNames != null &&
-                    includedPropertyNames.Any(name =>
-                        string.Equals(name, "materials", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(name, "sharedMaterials", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(name, "m_Materials", StringComparison.OrdinalIgnoreCase)))
-                {
-                    info.properties.Add(CreateRendererMaterialProperty(renderer));
                 }
             }
             catch (Exception e)
             {
                 Debug.LogWarning($"[Creator Works MCP] Could not serialize component {comp.GetType().Name}: {e.Message}");
+                if (requested.Length > 0)
+                    info.missingProperties = requested.Where(name => !info.properties.Any(property => property.name == name)).ToList();
             }
 
             return info;
@@ -6988,6 +7014,8 @@ namespace BantworksMCP
             public int maxResults;
             public string componentType;
             public string[] propertyNames;
+            public bool includeComponents = true;
+            public bool includeComponentProperties = true;
         }
 
         [Serializable]
@@ -7023,6 +7051,7 @@ namespace BantworksMCP
             public string fullType;
             public string globalObjectId;
             public List<PropertyInfo> properties;
+            public List<string> missingProperties;
         }
 
         [Serializable]
@@ -7373,12 +7402,14 @@ namespace BantworksMCP
             public string fullType;
             public string globalObjectId;
             public List<PropertyInfo> properties;
+            public List<string> missingProperties;
         }
 
         [Serializable]
         private class PropertyInfo
         {
             public string name;
+            public string propertyPath;
             public string type;
             public string value;
         }

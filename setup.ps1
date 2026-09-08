@@ -45,12 +45,12 @@ function Test-LegacyServerPath($value) {
 
 function Normalize-ToolGroups($Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) {
-        return "all"
+        return "core"
     }
 
     $entries = @(($Value.ToLowerInvariant() -split ",") | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique)
     if ($entries.Count -eq 0) {
-        throw "Tool groups must contain all, none, read, author, test, banter, or shadergraph."
+        throw "Tool groups must contain all, none, core, read, author, test, banter, or shadergraph."
     }
     if ($entries -contains "all" -or $entries -contains "none") {
         if ($entries.Count -ne 1) {
@@ -59,10 +59,10 @@ function Normalize-ToolGroups($Value) {
         return $entries[0]
     }
 
-    $knownGroups = @("read", "author", "test", "banter", "shadergraph")
+    $knownGroups = @("core", "read", "author", "test", "banter", "shadergraph")
     $unknown = @($entries | Where-Object { $_ -notin $knownGroups })
     if ($unknown.Count -gt 0) {
-        throw "Unknown tool groups: $($unknown -join ', '). Use all, none, read, author, test, banter, or shadergraph."
+        throw "Unknown tool groups: $($unknown -join ', '). Use all, none, core, read, author, test, banter, or shadergraph."
     }
 
     return (@($knownGroups | Where-Object { $_ -in $entries }) -join ",")
@@ -157,7 +157,7 @@ function Load-Config {
         channels = @()
         active_channel_id = $null
         mcp_server_path = Get-DefaultServerPath
-        tool_groups = "all"
+        tool_groups = "core"
         auto_start = $false
         enable_custom_scripts = $false
     }
@@ -287,6 +287,7 @@ function Set-CapabilityProfile {
     $config = Load-Config
     Write-Host ""
     Write-Host "Capability Profile" -ForegroundColor Cyan
+    Write-Host "  0. Token Saver (recommended)"
     Write-Host "  1. Full Unity + Banter"
     Write-Host "  2. Inspection"
     Write-Host "  3. Banter workflow"
@@ -295,11 +296,12 @@ function Set-CapabilityProfile {
     Write-Host "  6. Minimal routing"
     $selection = Read-Host "Select profile"
     $profiles = @{
+        "0" = "core"
         "1" = "all"
         "2" = "read"
-        "3" = "read,author,banter"
-        "4" = "read,author"
-        "5" = "read,test"
+        "3" = "core,banter"
+        "4" = "core,author"
+        "5" = "core,test"
         "6" = "none"
     }
     if (-not $profiles.ContainsKey($selection)) {
