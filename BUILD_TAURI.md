@@ -1,6 +1,6 @@
 # Building the Creator Works MCP Launcher
 
-The Tauri launcher provides a native GUI for discovering Unity projects, installing the bridge, and configuring Creator Works MCP for Codex or Claude Code. It builds on Windows and Linux (and macOS, with caveats around code signing).
+The Tauri launcher provides a native GUI for discovering Unity projects, installing the bridge, and configuring Creator Works MCP for Codex, Claude Code, Antigravity, and OpenCode. The 2.6.0-rc.1 workflow packages Windows, Linux, and macOS; packaging is separate from clean-install and real Unity-session acceptance.
 
 ## Prerequisites
 
@@ -102,6 +102,12 @@ The build runs the standalone server bundle and smoke test, downloads the pinned
 Run `cargo fmt --check` and `cargo test` in `launcher/src-tauri` before creating a release build. Building the launcher does not update an already installed copy under `%LOCALAPPDATA%` / `~/.local/share`; distribute or install the newly built artifact deliberately.
 
 Version tags matching `v<package version>` run the multi-platform release workflow. It creates a draft release containing the Windows NSIS installer, Linux `.AppImage`, `.deb`, and `.rpm` bundles, macOS `.dmg` bundle, standalone Node 20+ ZIP, and a consolidated `SHA256SUMS.txt`. Version metadata must agree across `package.json`, the MCP handshake, Cargo, and Tauri configuration; verify it with `npm run check:version`.
+
+Tags with a prerelease suffix (for example `v2.6.0-rc.1`) are marked as
+prereleases. Leave the release draft until all platform jobs and checksum
+consolidation pass. Review the version-specific notes under `docs/releases`,
+download the assets to check their hashes, and publish deliberately. A
+prerelease must not replace the stable release's **Latest** designation.
 
 ## Code Signing
 

@@ -2,11 +2,12 @@
 
 Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[Download Creator Works MCP 2.5.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1) | [Source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+[Try 2.6.0-rc.1 (prerelease)](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0-rc.1) | [Stable 2.5.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1) | [Release notes](docs/releases/2.6.0-rc.1.md) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
 
-This branch prepares **2.6.0-rc.1**, not yet published. The links above still
-point to the current stable release. See the [candidate notes](docs/releases/2.6.0-rc.1.md)
-for token-efficiency changes, contributor work, and acceptance limits.
+**2.6.0-rc.1 is a testing release, not a stable upgrade.** It focuses on smaller
+AI context, more precise scene inspection, and reliable compile/reload waits.
+It also includes FireRat's Linux/macOS packaging and optional test-run controls.
+Keep a backup and test your normal workflow before adopting it across projects.
 
 ![Creator Works MCP configured Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
 
@@ -14,7 +15,7 @@ for token-efficiency changes, contributor work, and acceptance limits.
 
 ## Highlights
 
-- **Guided Windows setup:** bundles a private Node.js 24 LTS runtime and configures Codex and Claude Code without requiring a separate Node installation
+- **Guided setup:** packages a private Node.js 24 LTS runtime and configures Codex, Claude Code, Antigravity, and OpenCode without requiring a separate Node installation
 - **Multi-project Unity workflow:** discovers Unity Hub projects, remembers the active project, routes MCP calls explicitly, and updates project-local bridges with backups
 - **Creator and Banter SDK awareness:** identifies Creator SDK, legacy Banter SDK, hybrid, Unity-only, and unknown projects, then selects the appropriate `BS.*` or `Banter.*` contracts
 - **Unity scene and asset tooling:** creates and modifies GameObjects, components, references, prefabs, scenes, build settings, and batches with preflight checks and Unity Undo support
@@ -24,9 +25,24 @@ for token-efficiency changes, contributor work, and acceptance limits.
 - **Token-aware setup:** new installations expose a compact 24-tool core profile, with specialist capabilities available as opt-in profiles
 - **Low-overhead local bridge:** keeps command polling responsive without repeatedly serializing an unchanged scene hierarchy
 
+## What to Expect in 2.6.0-rc.1
+
+- **Less context spent on setup:** new configurations default to 24 core tools instead of all 52. This reduces measured tool-schema bytes by about 54%, not your total token bill. Existing Full selections stay Full.
+- **Smaller documentation and scene replies:** focused reference lookup includes corrections, and bounded inspection replies report omitted or missing data. Full references and larger explicit reads remain available.
+- **Keep specialist capabilities:** select **Full Unity + Banter** for every tool, or a focused Banter, Unity authoring, Testing, or Shader Graph profile, then reconnect the client. Full also benefits from bounded replies and focused references.
+- **More dependable Editor feedback:** identity-only component queries avoid serialized property dumps, missing properties are explicit, and compile waits account for domain reload. A pending command reports how to resume polling instead of encouraging duplicate edits.
+- **More control over testing:** optionally disable unfiltered Unity test runs. The policy is project-scoped and survives domain reload; the compatible default still allows them.
+- **More distribution options:** Windows x64 EXE, Linux x86_64 AppImage/DEB/RPM, macOS Apple Silicon DMG, and a standalone Node.js ZIP. Platform packaging checks are not the same as real installation and Unity-session acceptance.
+
+The intended benefit is less unnecessary context and fewer avoidable retry
+loops, without removing capabilities from Full. End-to-end token, latency,
+provider-quota, and headset performance improvements have not been established.
+This release does not include render-pipeline conversion, a Creator SDK
+installer, Unity AI integration, or a player emulator.
+
 ## Quick Start
 
-1. Download `Creator.Works.MCP_2.5.1_x64-setup.exe` from the [2.5.1 release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1).
+1. For the candidate, download the Windows x64 setup EXE from [2.6.0-rc.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0-rc.1). For the stable release, use [2.5.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1). Linux/macOS testers can use the candidate's matching package.
 2. Open **Creator Works MCP** and choose a Unity project.
 3. Select the MCP clients you want to configure.
 4. Press **Set Up Creator Works MCP**.
@@ -35,11 +51,18 @@ for token-efficiency changes, contributor work, and acceptance limits.
 
 A ready bridge reports `ready: true` and `stateStatus: "fresh"`. The launcher can import existing project and client settings from an earlier installation; verify the imported projects and update their bridges before removing the previous Windows application.
 
+When upgrading, save and close the Unity projects you intend to update and back
+up project/client configuration first. Installing the app is not proof that an
+existing project bridge is current: use **Update Bridges** deliberately, reopen
+the selected project, and let Unity compile. After reconnecting the MCP client,
+check the project path, bridge version, and selected tool profile before editing.
+The installer alone does not establish compatibility with every SDK or project.
+
 During an EXE upgrade, Setup checks whether its private runtime is still active. If prompted, save your work, fully close Codex, Claude Code, and Creator Works MCP, then select **Retry**. Setup never force-closes those applications; an unattended install exits with code `10` while the runtime is locked.
 
 For the one-time move from the v2.5.0 MSI to the v2.5.1 EXE, close MCP clients before starting Setup. The old MSI must be removed before the new guarded EXE update path takes over.
 
-The Windows installer is currently unsigned, so Microsoft Defender SmartScreen can display an Unknown publisher warning. Verify the download against the included `SHA256SUMS.txt`. Stable releases publish the guided EXE rather than a separate MSI.
+The Windows installer is currently unsigned, so Microsoft Defender SmartScreen can display an Unknown publisher warning. macOS builds are not notarized. Verify downloads against the release's `SHA256SUMS.txt`; checksums verify integrity, not publisher identity. Windows releases use the guided EXE rather than a separate MSI.
 
 ## SDK Profiles
 
@@ -77,7 +100,7 @@ Targeted hierarchy queries serialize only the requested subtree or matching comp
 
 ## Token Use
 
-This section describes the 2.6.0 release candidate, not the published 2.5.1
+This section describes the 2.6.0-rc.1 prerelease, not the stable 2.5.1
 installer. Source tests do not replace real-project and installer acceptance.
 
 New launcher and setup configurations default to the `core` profile. It exposes
@@ -132,7 +155,10 @@ follow its project-bound polling instructions instead of submitting it again.
 
 ## MCP Clients
 
-The Windows launcher configures Codex and Claude Code directly. Any stdio-compatible MCP client can launch the standalone bundle:
+The launcher and cross-platform setup CLI configure Codex, Claude Code,
+Antigravity, and OpenCode. Configuration support does not prove every client's
+tool-schema presentation or runtime behavior; check the selected profile after
+reconnecting. Any stdio-compatible MCP client can launch the standalone bundle:
 
 ```toml
 [mcp_servers.creator-works]
@@ -146,7 +172,10 @@ UNITY_PROJECT_PATH = "E:/unity/MyProject"
 CREATOR_WORKS_TOOL_GROUPS = "core"
 ```
 
-The standalone ZIP requires Node.js 20 or newer. The Windows setup executable includes the private runtime.
+The standalone ZIP requires Node.js 20 or newer; it does not include Unity, a
+SideQuest SDK, or a private Node runtime. Launcher packages include their
+platform's private runtime. See [setup commands](BUILD_TAURI.md#alternative-setup-scripts)
+for the standalone route.
 
 Tool profiles can expose `core`, `read`, `author`, `test`, `banter`, `shadergraph`, a comma-separated combination, `all`, or `none` for routing and health only.
 
@@ -165,16 +194,22 @@ After Unity compiles, call `get_bridge_status`. Scene-changing tools require an 
 
 ## Release Status
 
-The `2.5.1` release is published only after these gates pass for the tagged revision:
+Local candidate verification: **182 Node tests**, **21 native launcher tests**,
+version synchronization, standalone protocol/reference smoke tests, Windows
+installer packaging, and an npm audit with zero reported vulnerabilities.
+The candidate bridge passed disposable Unity **2022.3.39f1** and
+**6000.3.21f1** compile/command fixtures, including targeted property reads,
+unchanged full-state snapshots, and isolated test-policy checks.
 
-- 137 Node tests
-- 13 native launcher tests
-- Node 20, 22, and 24 CI
-- Windows launcher packaging and standalone installation smoke tests
-- zero C# errors for the exact bridge in isolated Unity 2022.3.39f1 and Unity 6000.3.21f1 projects
-- checksum verification after downloading the published release assets
+The [CI and release runs](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/actions)
+record tagged packaging and platform results. Checksums cover all downloadable
+packages. Candidate clean-install/upgrade acceptance, everyday large-project
+editing, and end-to-end client token measurements remain testing gates before
+stable release. The policy fixture is not a full Unity Test Runner session.
 
-Shader Graph mutation remains experimental. Hosted Creator/Greenfield behavior, headset behavior, multiplayer behavior, and project-specific gameplay remain separate runtime acceptance gates.
+Shader Graph mutation remains experimental. Hosted Creator/Greenfield behavior,
+headset behavior, multiplayer behavior, and project-specific gameplay require
+separate runtime tests. Passing an Editor validator does not prove those results.
 
 ## AI-Generated Unity Examples
 
@@ -194,6 +229,8 @@ These project screenshots show scene hierarchy construction, configured Banter c
 - [Bridge protocol](docs/bridge-protocol.md)
 - [Compatibility matrix](docs/compatibility.md)
 - [Tool groups](docs/tool-groups.md)
+- [2.6.0-rc.1 changes and upgrade guidance](docs/releases/2.6.0-rc.1.md)
+- [Token optimization evidence and next phase](docs/token-optimization-next-phase.md)
 - [Banter custom Visual Scripting nodes](docs/banter-custom-visual-scripting-nodes.md)
 - [SideQuest workflows](docs/banter-workflows.md)
 - [Unity MCP benchmark](docs/unity-mcp-benchmark.md)
@@ -226,7 +263,11 @@ npm test
 (cd launcher/src-tauri && cargo test)
 ```
 
-The Tauri launcher can be built locally on Windows (NSIS/MSI), Linux (`.deb`/`.rpm`/`.AppImage`), and macOS (DMG). Tagged GitHub releases currently publish the Windows NSIS installer and standalone ZIP only. See [BUILD_TAURI.md](BUILD_TAURI.md) for host-specific toolchain setup. The cross-platform Node setup CLI configures Codex, Claude Code, Antigravity, and OpenCode; `./setup.sh` wraps it on Linux/macOS.
+The Tauri launcher can be built locally on Windows (NSIS/MSI), Linux (`.deb`/`.rpm`/`.AppImage`), and macOS (DMG). Starting with 2.6.0-rc.1, the tagged workflow packages Windows NSIS, Linux, macOS, and the standalone ZIP, then consolidates checksums before publication. See [BUILD_TAURI.md](BUILD_TAURI.md) for host-specific toolchain setup. The cross-platform Node setup CLI configures Codex, Claude Code, Antigravity, and OpenCode; `./setup.sh` wraps it on Linux/macOS.
+
+Thanks to [FireRat666](https://github.com/FireRat666) for the multiplatform and
+unfiltered-test policy contributions in [PR #27](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/pull/27)
+and [PR #28](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/pull/28).
 
 See [FEEDBACK.md](FEEDBACK.md) to report problems or improvements, [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, and [SECURITY.md](SECURITY.md) for vulnerability reporting.
 

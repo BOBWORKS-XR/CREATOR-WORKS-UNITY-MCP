@@ -39,7 +39,7 @@ jobs:
           projectPath: launcher
           tagName: ${{ github.ref_name }}
           releaseName: "Creator Works MCP __VERSION__"
-          releaseBody: "The guided Windows installer includes the MCP server, Unity bridge, and a private Node.js 24 LTS runtime. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments."
+          releaseBody: "Creator Works MCP packages the server, Unity bridge, and a private Node.js 24 LTS runtime for Windows, Linux, and macOS. Windows packages are unsigned and macOS packages are not notarized. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments. See the tagged README and version-specific release notes for benefits, profile choices, and acceptance limits."
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: "--bundles nsis"
@@ -114,7 +114,7 @@ jobs:
           projectPath: launcher
           tagName: ${{ github.ref_name }}
           releaseName: "Creator Works MCP __VERSION__"
-          releaseBody: "The guided Windows installer includes the MCP server, Unity bridge, and a private Node.js 24 LTS runtime. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments."
+          releaseBody: "Creator Works MCP packages the server, Unity bridge, and a private Node.js 24 LTS runtime for Windows, Linux, and macOS. Windows packages are unsigned and macOS packages are not notarized. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments. See the tagged README and version-specific release notes for benefits, profile choices, and acceptance limits."
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: "--bundles appimage,deb,rpm"
@@ -145,7 +145,7 @@ jobs:
           projectPath: launcher
           tagName: ${{ github.ref_name }}
           releaseName: "Creator Works MCP __VERSION__"
-          releaseBody: "The guided Windows installer includes the MCP server, Unity bridge, and a private Node.js 24 LTS runtime. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments."
+          releaseBody: "Creator Works MCP packages the server, Unity bridge, and a private Node.js 24 LTS runtime for Windows, Linux, and macOS. Windows packages are unsigned and macOS packages are not notarized. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments. See the tagged README and version-specific release notes for benefits, profile choices, and acceptance limits."
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: "--bundles dmg"

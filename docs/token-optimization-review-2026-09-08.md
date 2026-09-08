@@ -104,3 +104,34 @@ project details and the feedback file itself are not included in the release.
 The SDK registry and official Unity research are recorded in
 [the future roadmap](future-roadmap.md) and [registry reference](creator-sdk-registry.md).
 Workstream ownership and gates are in [the next-phase plan](token-optimization-next-phase.md).
+
+## 2.6.0-rc.1 Integration Pass
+
+This supersedes the earlier source-only packaging status above, not its historical
+measurements. Candidate Windows installer construction and staged payload checks
+passed; the candidate has not thereby passed installed-app or real-project acceptance.
+
+- Integrated FireRat's multiplatform packaging and unfiltered-test policy commits,
+  retaining authorship. Project-scoped persistence, settings round-trip/error
+  handling, and complete-asset checksum checks cover integration failure cases.
+- Forest/Blamb feedback led to identity-only component inventories, explicit
+  missing properties, targeted hidden/nested property lookup, renderer state
+  aliases, reload-aware compile waits, and project-bound timeout polling guidance.
+  No private feedback journal or project content is included in distribution.
+- Local final source checks: **182 Node tests**, **21 Rust tests**, version sync,
+  standalone protocol/reference and archive smokes, unsigned Windows NSIS build,
+  and zero reported npm audit vulnerabilities.
+- Disposable Unity **2022.3.39f1** and **6000.3.21f1** fixtures passed with the
+  exact candidate bridge, including targeted property queries without full-state
+  rewrites and isolated test-policy persistence/guard checks. The latter is not
+  a full Test Runner execution.
+- Final measured core schema: **21,827 bytes / 24 tools**; Full:
+  **47,268 bytes / 52 tools**. The approximately **54% schema-byte reduction**
+  does not establish task-level tokens, latency, cost, or quota savings.
+- A reported client-side generic tool-schema display was compared with the raw
+  installed server response, which retained its typed properties. The exact
+  downstream projection layer remains unverified; no speculative schema
+  weakening is included in this candidate.
+
+See the [prerelease notes](releases/2.6.0-rc.1.md) for upgrade guidance,
+platform-packaging scope, and remaining acceptance tests.

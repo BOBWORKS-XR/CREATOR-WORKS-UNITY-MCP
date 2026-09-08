@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.6.0-rc.1 - 2026-09-08
+
+Prerelease. See [release notes](docs/releases/2.6.0-rc.1.md) for upgrade steps,
+expected benefits, contributor credit, and acceptance limits.
+
+### Added
+
+- Focused local reference lookup with source revisions, continuations, and mandatory manual corrections; full reference resources remain available.
+- A 24-tool core default for new configurations, with explicit specialist profiles and existing Full selections preserved.
+- Identity-only component inventories, explicit missing-property reports, and fresh hidden/nested serialized property lookup.
+- FireRat's Linux/macOS release packaging and optional unfiltered-test restriction, with project-scoped persistence and settings/error-handling safeguards.
+
+### Changed
+
+- Hierarchy, component, console, import, compiler, and prefab replies default to a compact 64 KiB text budget, with complete-item omission reporting, retained failure/freshness metadata, and an explicit maximum of 4 MiB.
+- Graph prompts use focused documentation and node lookup instead of requesting entire manuals and catalogs.
+- Field-only/filtered scene inspection avoids full snapshots; renderer enabled/material properties use bounded canonical representations.
+- Compile waits require a fresh settled Editor after domain reload. Pending menu/query replies retain project-bound polling arguments and warn against duplicate submission.
+- Cross-platform setup includes Codex, Claude Code, Antigravity, and OpenCode configuration. Release checksums cover all uploaded platform packages and reject incomplete inventories.
+
+### Verified Locally
+
+- 182 Node tests, 21 native launcher tests, version synchronization, isolated standalone protocol/reference and archive smokes, Windows NSIS packaging, and zero reported npm audit vulnerabilities.
+- Disposable Unity 2022.3.39f1 and 6000.3.21f1 compile/command fixtures passed, including targeted reads without full-state rewrites and isolated test-policy checks.
+- Core tool-schema text is 21,827 bytes versus 47,268 for Full (about 54% smaller). This is not an end-to-end token, cost, latency, or quota-saving claim.
+
+Clean installation/upgrade, everyday real-project editing, and hosted/headset
+acceptance of this exact candidate remain separate from source and packaging
+checks. Shader Graph mutation remains experimental.
+
 ## 2.5.1 - 2026-09-03
 
 ### Fixed

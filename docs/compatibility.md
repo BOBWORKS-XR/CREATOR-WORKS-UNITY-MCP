@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-Reviewed: 2026-08-26
+Reviewed: 2026-09-08. Historical rows retain their original version scope.
 
 This matrix records exercised combinations, not assumptions based only on
 package metadata. A row marked "manual" was run in a disposable local project,
@@ -11,20 +11,25 @@ enforced by the repository workflow.
 
 | Surface | Status | Verification |
 |---------|--------|--------------|
-| Bundled Node.js 24 LTS | Windows launcher runtime | The installer packages a checksum-verified official Windows x64 executable and writes its absolute path to managed clients |
+| Bundled Node.js 24 LTS | Platform-specific launcher runtime | Packaging verifies the pinned runtime archive/binary and configures managed clients with its installed path; OS installation acceptance is separate |
 | Node.js 20, 22, 24 | Standalone/source CI target | TypeScript build, server test suite, standalone esbuild bundle, and isolated no-`node_modules` smoke |
 | Codex desktop/CLI | Supported configuration | Launcher and `setup.ps1` write stdio configuration, project environment, 20-second startup timeout, and 600-second tool timeout |
 | Claude Code/Desktop | Supported configuration | Launcher and `setup.ps1` write the same stdio server and selected project environment |
+| Antigravity and OpenCode | Launcher and cross-platform CLI configuration | Isolated configuration tests cover JSON/JSONC preservation; real-client workflow acceptance remains separate |
 | Other MCP clients | Protocol-compatible | Requires stdio MCP support and a way to set `UNITY_PROJECT_PATH`; no client-specific integration is assumed |
 
 The server intentionally rejects `--http`. It does not open a network listener.
-Tool-surface restriction is client-independent through `CREATOR_WORKS_TOOL_GROUPS`;
-the default remains `all` for backward compatibility.
+Tool-surface restriction is client-independent through `CREATOR_WORKS_TOOL_GROUPS`.
+New launcher/setup configurations default to `core` in 2.6.0-rc.1. Existing
+saved Full selections and manual server starts without the variable retain
+`all` for backward compatibility.
 
 ## Unity and SideQuest SDKs
 
 | Unity | Visual Scripting | SideQuest SDK | Result |
 |-------|------------------|------------|--------|
+| 2022.3.39f1 | 1.9.9 | None | 2.6.0-rc.1 automated local disposable fixture: bridge compile, correlated targeted/identity-only and hidden/nested property reads, asset/graph references, unchanged full-state snapshots, and isolated test-policy guard/persistence checks passed |
+| 6000.3.21f1 | 1.9.9 | None | Same 2.6.0-rc.1 disposable fixture passed; this is not real-project, full Test Runner execution, or hosted-client acceptance |
 | 2022.3.39f1 | 1.9.4 | None | Manual: bridge compiled; canonical Start graph imported and deserialized with no missing elements |
 | 2022.3.39f1 | None | None | Automated local disposable fixture: 2.3.0 bridge compiled; a live correlated root/subtree query returned local transforms without rewriting the full hierarchy snapshot |
 | 6000.3.2f1 | 1.9.9 | 3.2.2, source fingerprint `c893607975bb44f319445b533b421d184f6a5285` | Manual: bridge and SDK compiled; generated `Banter.VisualScripting.OnGrab` graph imported with one node and no missing elements; SDK validator passed |
@@ -93,16 +98,19 @@ The repeatable obstacle fixture and its safety boundary are documented in
 Play Mode domain reloads are expected. Run IDs and result files are persisted
 under the project's `.bantworks-mcp` state so a client can resume polling.
 
-## Windows Distribution
+## Distribution
 
 - The standalone server is one versioned ESM file and was smoke-tested from an
   isolated directory without `node_modules`.
 - The Tauri NSIS build completed locally and included the server bundle, Unity
   bridge, license, and third-party notices as application resources.
-- MSI and NSIS are release workflow targets. They are unsigned unless release
-  signing secrets and certificate settings are supplied.
-- Tagged draft releases include SHA-256 checksums for the standalone archive
-  and generated Windows installers.
+- The 2.6.0-rc.1 tagged workflow builds Windows NSIS, Linux x86_64
+  AppImage/DEB/RPM, macOS Apple Silicon DMG, and the standalone archive. MSI is
+  not published. Windows packages are unsigned; macOS is not notarized.
+- Consolidated SHA-256 checksums must include every uploaded platform package
+  before publication. They establish download integrity, not publisher identity.
+- Candidate clean-install/upgrade and real Unity-session acceptance are separate
+  from CI/build results, especially for the new Linux/macOS packages.
 
 ## Remaining Coverage
 

@@ -1,7 +1,8 @@
 # Token Optimization Options and Next Phase
 
 Updated 2026-09-08. This is a proposed work split, not dispatched tasks or a
-promise of savings against any provider's account quota.
+promise of savings against any provider's account quota. The 2.6.0-rc.1
+prerelease packages the implemented work; it does not complete runtime acceptance.
 
 ## Options Without Confusing the Tradeoffs
 
@@ -27,7 +28,7 @@ reuse are client-controlled, not an MCP account-budget guarantee.
 
 | Workstream | Scope | Completion evidence |
 | --- | --- | --- |
-| A: Package and upgrade acceptance | Build the actual Windows installer from this branch; verify source bridge and bundled server propagation; preserve existing client profiles | Clean install and upgrade smoke; installed payload hashes; 52 tools in Full, 24 in core; reference and bounded-query calls from the installed payload |
+| A: Package and upgrade acceptance | Windows build and staged source/server/bridge checks passed for 2.6.0-rc.1; platform packaging runs in tagged CI. Next: clean install and upgrade while preserving client profiles | Installed payload hashes; 52 tools in Full, 24 in core; reference and bounded-query calls from the installed payload; Linux/macOS install and client reconnect acceptance |
 | B: Task-level efficiency and behavior | Same tasks in disposable Unity-only and Creator/Banter projects: large hierarchies, error storms, complex/embedded graphs, and queued commands during project switching | Total tool input/output bytes, calls, retries, time and validation; no false completion or wrong-project verification; client tokens where available; no new Editor hitches |
 | C: Graph artifact design | Design a small opt-in handle-based generate/validate/write path, leaving existing JSON tools compatible | Same graphs and validators, no stale or cross-project artifact reuse; measured round-trip byte reduction before adoption |
 | D: Unity interoperability probe | Existing stdio server in documented Assistant extensions first; optional Pipeline commands only if beneficial | Exact package versions, correct project selection, bounded replies, errors/reloads tested; no duplicate generic tools or internal Unity APIs |
@@ -35,7 +36,7 @@ reuse are client-controlled, not an MCP account-budget guarantee.
 A and B can proceed independently once the source revision is frozen. C starts
 with a design review and failing workload measurement, not a broad rewrite.
 D is time-boxed research and must not block token fixes. Integration review
-checks each workstream's evidence before a version bump, release, or mass update.
+checks each workstream's evidence before stable promotion or a broad rollout.
 Coordinate with concurrent Built-in-to-URP conversion work before merging or
 packaging shared source. This branch does not own render-pipeline conversion.
 
