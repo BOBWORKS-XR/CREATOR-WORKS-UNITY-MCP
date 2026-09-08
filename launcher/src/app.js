@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     'codexState', 'claudeState', 'antigravityState', 'opencodeState',
     'setupBtn', 'setupMessage', 'projectsList', 'emptyState', 'addProjectBtn',
     'updateBridgesBtn',
-    'mcpServerPath', 'toolGroups', 'autoConfig', 'customScripts', 'applyConfigBtn',
+    'mcpServerPath', 'toolGroups', 'autoConfig', 'customScripts', 'allowAllTests', 'applyConfigBtn',
     'applyCodexBtn', 'applyAntigravityBtn', 'applyOpenCodeBtn',
     'disconnectBtn', 'disconnectCodexBtn', 'disconnectAntigravityBtn', 'disconnectOpenCodeBtn',
     'installExtensionBtn',
@@ -104,6 +104,18 @@ function setupEventListeners() {
       await window.__TAURI__.core.invoke('set_unity_custom_scripts', {
         unityProjectPath: channel.unity_project_path,
         enabled: config.enable_custom_scripts
+      });
+    }
+  });
+
+  elements.allowAllTests.addEventListener('change', async function() {
+    config.allow_all_tests = elements.allowAllTests.checked;
+    await saveLauncherConfig('Failed to save test policy preference');
+    const channel = getActiveChannel();
+    if (channel) {
+      await window.__TAURI__.core.invoke('set_unity_allow_all_tests', {
+        unityProjectPath: channel.unity_project_path,
+        enabled: config.allow_all_tests
       });
     }
   });
@@ -229,6 +241,7 @@ function updateUI() {
   elements.toolGroups.value = toolGroups;
   elements.autoConfig.checked = config.auto_start !== false;
   elements.customScripts.checked = config.enable_custom_scripts === true;
+  elements.allowAllTests.checked = config.allow_all_tests !== false;
   renderProjects();
   updateSetupStatus();
 }

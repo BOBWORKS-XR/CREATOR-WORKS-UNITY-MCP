@@ -69,3 +69,12 @@ test("custom script mode exposes existing compiled components without claiming t
   assert.match(bridgeSource, /MCP can add existing components from compiled project C# assemblies/);
   assert.doesNotMatch(bridgeSource, /MCP can add custom C# scripts/);
 });
+
+test("all-tests mode allows full suite runs by default and can be restricted in bridge and launcher", () => {
+  assert.match(launcherHtml, /Allow Running All Tests/);
+  assert.match(launcherHtml, /Allow MCP to run the entire test suite without filters/);
+  assert.match(bridgeSource, /AllowAllTestsKey = "BantworksMCP_AllowAllTests"/);
+  assert.match(bridgeSource, /Running all tests without a filter is disabled for this project/);
+  assert.match(bridgeSource, /MCP requires specific testNames, groupNames, or assembly filters/);
+});
+

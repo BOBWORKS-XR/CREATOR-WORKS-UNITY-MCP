@@ -109,6 +109,14 @@ namespace BantworksMCP
             set => EditorPrefs.SetBool(EnableCustomScriptsKey, value);
         }
 
+        // Test runner policy - controls whether unfiltered full test suite sweeps are allowed
+        private static readonly string AllowAllTestsKey = "BantworksMCP_AllowAllTests";
+        public static bool AllowAllTests
+        {
+            get => EditorPrefs.GetBool(AllowAllTestsKey, true);
+            set => EditorPrefs.SetBool(AllowAllTestsKey, value);
+        }
+
         private static bool BackgroundStateExportInPlayMode
         {
             get => EditorPrefs.GetBool(BackgroundStateExportKey, false);
@@ -315,11 +323,21 @@ namespace BantworksMCP
 
                 string json = File.ReadAllText(settingsPath);
                 var settings = JsonUtility.FromJson<LauncherSettings>(json);
-                if (settings != null && EnableCustomScripts != settings.enableCustomScripts)
+                if (settings != null)
                 {
-                    EnableCustomScripts = settings.enableCustomScripts;
-                    LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Launcher settings applied";
-                    Debug.Log($"[Creator Works MCP] Custom scripts {(settings.enableCustomScripts ? "enabled" : "disabled")} from launcher settings");
+                    if (EnableCustomScripts != settings.enableCustomScripts)
+                    {
+                        EnableCustomScripts = settings.enableCustomScripts;
+                        LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Launcher settings applied";
+                        Debug.Log($"[Creator Works MCP] Custom scripts {(settings.enableCustomScripts ? "enabled" : "disabled")} from launcher settings");
+                    }
+
+                    if (AllowAllTests != settings.allowAllTests)
+                    {
+                        AllowAllTests = settings.allowAllTests;
+                        LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Launcher test policy applied";
+                        Debug.Log($"[Creator Works MCP] Unfiltered test runs {(settings.allowAllTests ? "allowed" : "blocked")} from launcher settings");
+                    }
                 }
 
                 lastLauncherSettingsWriteTime = writeTime;
@@ -2207,6 +2225,18 @@ namespace BantworksMCP
                 assemblyNames = CleanFilterValues(cmd.assemblyNames),
                 tests = new List<UnityTestCaseResult>()
             };
+
+            if (!AllowAllTests &&
+                run.testNames.Length == 0 &&
+                run.groupNames.Length == 0 &&
+                run.categoryNames.Length == 0 &&
+                run.assemblyNames.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    "Running all tests without a filter is disabled for this project in Creator Works MCP settings. " +
+                    "Specify targeted testNames, groupNames, or assembly filters, or enable 'Allow Running All Tests' in the MCP settings window.");
+            }
+
             SaveTestRunResult(run);
 
             try
@@ -7538,6 +7568,7 @@ namespace BantworksMCP
         private class LauncherSettings
         {
             public bool enableCustomScripts;
+            public bool allowAllTests = true;
         }
 
         #endregion
@@ -7718,6 +7749,29 @@ namespace BantworksMCP
                 newValue
                     ? "MCP can add existing components from compiled project C# assemblies"
                     : "MCP only adds Unity built-in, Banter SDK, and Creator SDK components",
+                MessageType.Info);
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("All Tests:", GUILayout.Width(100));
+            bool allowAllTests = BantworksMCPBridge.AllowAllTests;
+            bool newAllowAllTests = EditorGUILayout.Toggle(allowAllTests, GUILayout.Width(20));
+            if (newAllowAllTests != allowAllTests)
+            {
+                BantworksMCPBridge.AllowAllTests = newAllowAllTests;
+            }
+            GUILayout.Label(newAllowAllTests ? "Allowed (Default)" : "Blocked (Filtered Only)",
+                EditorStyles.miniLabel);
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("", GUILayout.Width(100));
+            EditorGUILayout.HelpBox(
+                newAllowAllTests
+                    ? "MCP is permitted to run all tests when no filter is provided"
+                    : "MCP requires specific testNames, groupNames, or assembly filters to prevent freezing on large suites",
                 MessageType.Info);
             EditorGUILayout.EndHorizontal();
 

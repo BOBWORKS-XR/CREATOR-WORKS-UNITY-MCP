@@ -502,7 +502,10 @@ export function installUnityExtension({ configRoot, mcpRoot }) {
   mkdirSync(stateDir, { recursive: true });
   atomicWriteText(
     path.join(stateDir, "launcher-settings.json"),
-    `${JSON.stringify({ enableCustomScripts: Boolean(config.enable_custom_scripts) }, null, 2)}\n`,
+    `${JSON.stringify({
+      enableCustomScripts: Boolean(config.enable_custom_scripts),
+      allowAllTests: config.allow_all_tests !== false,
+    }, null, 2)}\n`,
   );
   return { destination };
 }
