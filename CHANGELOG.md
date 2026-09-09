@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 2.6.0 - 2026-09-09
+
+Stable release of the initial token-efficiency work. See [release notes](docs/releases/2.6.0.md).
+
+### Added
+
+- Optional per-project `MCP_FEEDBACK.md` with append-only notes, explicit consent for self-reported usage, and check-ins throttled to five unique task boundaries and 24 hours. Local only, disabled by default, with no account access or telemetry.
+- Manual stable-release checks and opt-in automatic GitHub metadata checks in the launcher. Downloads and installation remain manual.
+- Measured post-apply create/modify transform receipts, including stable object/parent identities and explicit world/local values. Existing request-summary fields remain labelled as requested data.
+
+### Fixed
+
+- Full active-scene hierarchy export no longer silently stops at depth 10; traversal is iterative. Legacy snapshot completeness is explicitly unknown, and query metadata precedes the data payload.
+- Command dispatch is persisted before invoking Unity; retained completion/status records remain available after consuming transport acknowledgements. Dispatched does not mean a build completed or prove continued execution.
+- World-space position/rotation and local-scale semantics are documented; no parenting behavior was changed.
+- Updated the pinned transitive Hono dependency from 4.13.0 to 4.13.5 for the upstream security fixes; no new dependency was added.
+
+### Included from the Prerelease
+
+- Focused corrected references, compact response budgets, identity-only queries, compile/reload waits, optional tool profiles, FireRat's cross-platform packaging and test-policy controls.
+- Core now contains 25 tools (23,172 schema bytes), versus Full's 53 (48,613 bytes). These are schema-byte measurements, not end-to-end token, quota, latency, or headset-performance claims.
+
 ### Fixed
 
 - Release asset labels now resolve draft assets through `gh release view` and their returned API URLs. The REST by-tag endpoint returned 404 during the 2.6.0-rc.1 draft-label step after all packages and consolidated checksums had uploaded. This automation-only follow-up does not change the tagged application binaries.

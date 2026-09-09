@@ -12,6 +12,7 @@ export const ALWAYS_AVAILABLE_TOOLS = new Set([
 
 export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<string>>> = {
   core: new Set([
+    "project_feedback",
     "query_project_state",
     "check_import_status",
     "wait_for_unity_compile",

@@ -12,7 +12,7 @@ export interface UnityCommandStatusResult extends Record<string, unknown> {
   success: boolean;
   accepted?: boolean;
   pending?: boolean;
-  status: "completed" | "pending" | "unknown";
+  status: "completed" | "pending" | "dispatched" | "unknown";
   commandId: string;
   projectId?: string;
   projectPath: string;
@@ -53,7 +53,9 @@ export function getUnityCommandStatus(
   }
 
   const descriptor = readBridgeInstanceDescriptor(config);
-  const resultPath = path.join(config.mcpStatePath, "command-results", `${commandId}.json`);
+  const completionPath = path.join(config.mcpStatePath, "command-results", `${commandId}.json`);
+  const retainedPath = path.join(config.mcpStatePath, "command-status", `${commandId}.json`);
+  const resultPath = fs.existsSync(completionPath) ? completionPath : retainedPath;
   if (fs.existsSync(resultPath)) {
     try {
       const result = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as BridgeCommandResult;
@@ -75,7 +77,15 @@ export function getUnityCommandStatus(
           `Unity command result came from Editor '${result.editorInstanceId}', not active Editor '${descriptor.editorInstanceId}'.`
         );
       }
-      fs.unlinkSync(resultPath);
+      if (result.status === "dispatched") {
+        return {
+          success: false, accepted: true, pending: true, status: "dispatched", commandId,
+          projectId: config.projectId, projectPath: result.projectPath || config.unityProjectPath,
+          editorInstanceId: result.editorInstanceId, lastObservedAt: result.timestamp,
+          message: "Unity dispatched this command. Completion is unknown; this is not proof it is still running. Do not resubmit. Menu return does not prove an asynchronous build completed.",
+        };
+      }
+      if (resultPath === completionPath) fs.unlinkSync(resultPath);
       return {
         success: result.success === true,
         accepted: true,
@@ -87,6 +97,8 @@ export function getUnityCommandStatus(
         editorInstanceId: result.editorInstanceId,
         message: result.message,
         error: result.error,
+        observed: result.observed ?? undefined,
+        lastObservedAt: result.timestamp,
       };
     } catch (error) {
       return failure(

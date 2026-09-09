@@ -12,6 +12,9 @@ let discoveredProjects = [];
 let selectedProjectPath = '';
 let clientSelectionInitialized = false;
 let projectStatusTimer = null;
+let updateTimer = null;
+let releaseUrl = null;
+let feedbackRequest = 0;
 
 const elements = {};
 
@@ -22,7 +25,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     'codexDetection', 'claudeDetection', 'antigravityDetection', 'opencodeDetection',
     'codexState', 'claudeState', 'antigravityState', 'opencodeState',
     'setupBtn', 'setupMessage', 'projectsList', 'emptyState', 'addProjectBtn',
-    'updateBridgesBtn',
+    'updateBridgesBtn', 'localFeedback', 'usageCheckIns', 'feedbackStatus',
+    'automaticUpdates', 'checkUpdatesBtn', 'openReleaseBtn', 'updateStatus',
     'mcpServerPath', 'toolGroups', 'autoConfig', 'customScripts', 'allowAllTests', 'applyConfigBtn',
     'applyCodexBtn', 'applyAntigravityBtn', 'applyOpenCodeBtn',
     'disconnectBtn', 'disconnectCodexBtn', 'disconnectAntigravityBtn', 'disconnectOpenCodeBtn',
@@ -47,6 +51,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     renderDiscoveredProjects();
     await refreshOnboardingStatus();
     updateUI();
+    scheduleUpdateChecks();
   } catch (error) {
     console.error('Launcher initialization failed:', error);
     showToast('Failed to initialize launcher: ' + String(error), 'error');
@@ -54,11 +59,31 @@ document.addEventListener('DOMContentLoaded', async function() {
 });
 
 function setupEventListeners() {
+  elements.localFeedback.addEventListener('change', saveFeedbackSettings);
+  elements.usageCheckIns.addEventListener('change', saveFeedbackSettings);
+  elements.checkUpdatesBtn.addEventListener('click', checkForUpdates);
+  elements.openReleaseBtn.addEventListener('click', async function() {
+    if (releaseUrl) {
+      try { await window.__TAURI__.shell.open(releaseUrl); }
+      catch (error) { elements.updateStatus.textContent = 'Could not open release: ' + String(error); }
+    }
+  });
+  elements.automaticUpdates.addEventListener('change', async function() {
+    const previous = config.automatic_update_checks === true;
+    config.automatic_update_checks = elements.automaticUpdates.checked;
+    if (!await saveLauncherConfig('Failed to save update preference')) {
+      config.automatic_update_checks = previous;
+      elements.automaticUpdates.checked = previous;
+    }
+    scheduleUpdateChecks();
+  });
   elements.browseProjectBtn.addEventListener('click', chooseProjectForSetup);
   elements.addProjectBtn.addEventListener('click', addProjectFromPicker);
   elements.updateBridgesBtn.addEventListener('click', updateConfiguredBridges);
 
   elements.projectPath.addEventListener('input', function() {
+    elements.localFeedback.disabled = true;
+    elements.usageCheckIns.disabled = true;
     selectedProjectPath = elements.projectPath.value.trim();
     clearTimeout(projectStatusTimer);
     projectStatusTimer = setTimeout(async function() {
@@ -225,6 +250,7 @@ async function refreshOnboardingStatus() {
   onboarding = await window.__TAURI__.core.invoke('get_onboarding_status', {
     unityProjectPath: selectedProjectPath || null
   });
+  await refreshFeedbackSettings();
   if (!clientSelectionInitialized) {
     const codex = getClientStatus('codex');
     const claude = getClientStatus('claude');
@@ -239,6 +265,7 @@ async function refreshOnboardingStatus() {
 }
 
 function updateUI() {
+  elements.automaticUpdates.checked = config.automatic_update_checks === true;
   elements.mcpServerPath.value = config.mcp_server_path || '';
   const toolGroups = config.tool_groups || 'core';
   let option = Array.from(elements.toolGroups.options).find(function(item) {
@@ -697,6 +724,67 @@ function getClientStatus(id) {
 function samePath(left, right) {
   return String(left || '').replace(/\\/g, '/').replace(/\/$/, '').toLowerCase() ===
     String(right || '').replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
+}
+
+async function refreshFeedbackSettings() {
+  const request = ++feedbackRequest;
+  const project = selectedProjectPath;
+  elements.localFeedback.disabled = true;
+  elements.usageCheckIns.disabled = true;
+  elements.localFeedback.checked = false;
+  elements.usageCheckIns.checked = false;
+  try {
+    if (!project) { elements.feedbackStatus.textContent = 'Select a Unity project. Local only; nothing is uploaded.'; return; }
+    const settings = await window.__TAURI__.core.invoke('get_project_feedback_settings', { unityProjectPath: project });
+    if (request !== feedbackRequest || project !== selectedProjectPath) return;
+    elements.localFeedback.checked = settings.enabled;
+    elements.localFeedback.disabled = false;
+    elements.usageCheckIns.checked = settings.usageCheckIns;
+    elements.usageCheckIns.disabled = !settings.enabled;
+    elements.feedbackStatus.textContent = settings.enabled ? settings.file : 'Local only. Nothing is uploaded.';
+  } catch (error) {
+    if (request === feedbackRequest) elements.feedbackStatus.textContent = String(error);
+  }
+}
+
+async function saveFeedbackSettings() {
+  const project = selectedProjectPath;
+  const enabled = elements.localFeedback.checked;
+  const usageCheckIns = enabled && elements.usageCheckIns.checked;
+  ++feedbackRequest;
+  elements.localFeedback.disabled = true;
+  elements.usageCheckIns.disabled = true;
+  try {
+    await window.__TAURI__.core.invoke('set_project_feedback_settings', { unityProjectPath: project, enabled, usageCheckIns });
+  } catch (error) { showToast('Feedback preference was not saved: ' + String(error), 'error'); }
+  await refreshFeedbackSettings();
+}
+
+function scheduleUpdateChecks() {
+  clearInterval(updateTimer);
+  if (config.automatic_update_checks === true) {
+    void checkForUpdates();
+    updateTimer = setInterval(() => void checkForUpdates(), 6 * 60 * 60 * 1000);
+  }
+}
+
+async function checkForUpdates() {
+  if (elements.checkUpdatesBtn.disabled) return;
+  elements.checkUpdatesBtn.disabled = true;
+  elements.openReleaseBtn.hidden = true;
+  releaseUrl = null;
+  elements.updateStatus.textContent = 'Checking GitHub...';
+  try {
+    const { checkStableUpdate } = await import('./updates.js');
+    const version = document.getElementById('appVersion').textContent.trim();
+    const result = await checkStableUpdate(version);
+    if (result.available) {
+      releaseUrl = result.url;
+      elements.openReleaseBtn.hidden = false;
+      elements.updateStatus.textContent = 'Version ' + result.version + ' is available. Save work before installing; update project bridges afterward.';
+    } else elements.updateStatus.textContent = 'No newer stable release found.';
+  } catch (error) { elements.updateStatus.textContent = 'Update check failed: ' + String(error); }
+  finally { elements.checkUpdatesBtn.disabled = false; }
 }
 
 function delay(milliseconds) {

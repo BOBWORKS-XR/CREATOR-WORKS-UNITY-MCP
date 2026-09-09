@@ -36,6 +36,7 @@ namespace BantworksMCP
         private static readonly string CommandsFolder = Path.Combine(MCPFolder, "commands");
         private static readonly string FailedCommandsFolder = Path.Combine(CommandsFolder, "failed");
         private static readonly string CommandResultsFolder = Path.Combine(StateFolder, "command-results");
+        private static readonly string CommandStatusFolder = Path.Combine(StateFolder, "command-status");
         private static readonly string BoundsResultsFolder = Path.Combine(StateFolder, "bounds-results");
         private static readonly string ScreenshotResultsFolder = Path.Combine(StateFolder, "screenshot-results");
         private static readonly string AssetSearchResultsFolder = Path.Combine(StateFolder, "asset-search-results");
@@ -48,7 +49,7 @@ namespace BantworksMCP
         private static readonly string EditorMenuResultsFolder = Path.Combine(StateFolder, "editor-menu-results");
         private static readonly string HierarchyQueryResultsFolder = Path.Combine(StateFolder, "hierarchy-query-results");
         private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
-        private const string BridgeVersion = "2.6.0-rc.1";
+        private const string BridgeVersion = "2.6.0";
         private const int BridgeProtocolVersion = 1;
         private const int MinimumBridgeProtocolVersion = 1;
         private const int MaximumPipeCommandCharacters = 4 * 1024 * 1024;
@@ -852,10 +853,13 @@ namespace BantworksMCP
             {
                 if (command == null)
                     command = JsonUtility.FromJson<MCPCommand>(json);
-                string message = ProcessCommandJson(json, command);
+                ObjectTransformReceipt observed;
+                string message = ProcessCommandJson(json, command, out observed);
                 CommandsProcessed++;
                 LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Command processed";
-                return CreateCommandResult(command != null ? command.id : null, true, message, null);
+                var result = CreateCommandResult(command != null ? command.id : null, true, message, null);
+                result.observed = observed;
+                return result;
             }
             catch (Exception e)
             {
@@ -864,8 +868,9 @@ namespace BantworksMCP
             }
         }
 
-        private static string ProcessCommandJson(string json, MCPCommand baseCommand)
+        private static string ProcessCommandJson(string json, MCPCommand baseCommand, out ObjectTransformReceipt observed)
         {
+            observed = null;
             if (baseCommand == null || string.IsNullOrWhiteSpace(baseCommand.type))
                 throw new InvalidOperationException("Command is missing a type");
             if (baseCommand.protocolVersion != 0 && baseCommand.protocolVersion != BridgeProtocolVersion)
@@ -873,6 +878,13 @@ namespace BantworksMCP
                     "Unsupported bridge protocol version " + baseCommand.protocolVersion +
                     "; expected " + BridgeProtocolVersion + ".");
             ValidateCommandTarget(baseCommand);
+            if (!IsSafeCorrelationId(baseCommand.id))
+                throw new InvalidOperationException("Command requires a safe correlation ID");
+            // Persist before invoking Unity: a synchronous menu can block the heartbeat and pipe reply.
+            Directory.CreateDirectory(CommandStatusFolder);
+            var dispatch = CreateCommandResult(baseCommand.id, false, "Dispatched; completion is not yet known. Do not resubmit.", null);
+            dispatch.status = "dispatched";
+            WriteAtomicText(Path.Combine(CommandStatusFolder, baseCommand.id + ".json"), JsonUtility.ToJson(dispatch));
 
             switch (baseCommand.type)
             {
@@ -992,7 +1004,7 @@ namespace BantworksMCP
 
                 case "create_gameobject":
                     var createCmd = JsonUtility.FromJson<CreateGameObjectCommand>(json);
-                    CreateGameObject(createCmd);
+                    observed = CaptureTransformReceipt(CreateGameObject(createCmd));
                     return $"Created GameObject: {createCmd.name}";
 
                 case "delete_gameobject":
@@ -1002,7 +1014,7 @@ namespace BantworksMCP
 
                 case "modify_gameobject":
                     var modifyCmd = JsonUtility.FromJson<ModifyGameObjectCommand>(json);
-                    ModifyGameObject(modifyCmd);
+                    observed = CaptureTransformReceipt(ModifyGameObject(modifyCmd));
                     return $"Modified GameObject: {modifyCmd.objectPath}";
 
                 case "add_component":
@@ -1088,7 +1100,8 @@ namespace BantworksMCP
                 error = error,
                 projectPath = ProjectRoot,
                 editorInstanceId = GetEditorInstanceId(),
-                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                status = "completed"
             };
         }
 
@@ -1117,7 +1130,7 @@ namespace BantworksMCP
 
         private static void WriteCommandResult(CommandResult result)
         {
-            if (result == null || string.IsNullOrWhiteSpace(result.commandId))
+            if (result == null || !IsSafeCorrelationId(result.commandId))
                 return;
 
             try
@@ -1125,6 +1138,9 @@ namespace BantworksMCP
                 WriteAtomicText(
                     Path.Combine(CommandResultsFolder, $"{result.commandId}.json"),
                     JsonUtility.ToJson(result, true));
+                Directory.CreateDirectory(CommandStatusFolder);
+                WriteAtomicText(Path.Combine(CommandStatusFolder, result.commandId + ".json"), JsonUtility.ToJson(result));
+                DeleteOldFiles(CommandStatusFolder, "*.json", 200);
                 DeleteOldFiles(CommandResultsFolder, "*.json", 200);
             }
             catch (Exception e)
@@ -1133,7 +1149,7 @@ namespace BantworksMCP
             }
         }
 
-        private static void CreateGameObject(CreateGameObjectCommand cmd)
+        private static GameObject CreateGameObject(CreateGameObjectCommand cmd)
         {
             if (cmd == null || string.IsNullOrWhiteSpace(cmd.name))
                 throw new InvalidOperationException("Create GameObject command requires a name");
@@ -1190,6 +1206,7 @@ namespace BantworksMCP
 
             Debug.Log($"[Creator Works MCP] Created GameObject: {cmd.name}");
             ExportSceneHierarchy();
+            return obj;
         }
 
         private static void DeleteGameObject(DeleteGameObjectCommand cmd)
@@ -3148,7 +3165,7 @@ namespace BantworksMCP
             DeleteOldFiles(SceneResultsFolder, "*.json", 50);
         }
 
-        private static void ModifyGameObject(ModifyGameObjectCommand cmd)
+        private static GameObject ModifyGameObject(ModifyGameObjectCommand cmd)
         {
             var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
 
@@ -3172,6 +3189,24 @@ namespace BantworksMCP
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
             Debug.Log($"[Creator Works MCP] Modified GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
             ExportSceneHierarchy();
+            return obj;
+        }
+
+        private static ObjectTransformReceipt CaptureTransformReceipt(GameObject obj)
+        {
+            var t = obj.transform;
+            return new ObjectTransformReceipt
+            {
+                objectId = GetStableObjectId(obj), path = GetGameObjectPath(obj),
+                parentId = t.parent == null ? null : GetStableObjectId(t.parent.gameObject),
+                worldPosition = new[] { t.position.x, t.position.y, t.position.z },
+                worldEulerRotation = new[] { t.eulerAngles.x, t.eulerAngles.y, t.eulerAngles.z },
+                localPosition = new[] { t.localPosition.x, t.localPosition.y, t.localPosition.z },
+                localEulerRotation = new[] { t.localEulerAngles.x, t.localEulerAngles.y, t.localEulerAngles.z },
+                localScale = new[] { t.localScale.x, t.localScale.y, t.localScale.z },
+                lossyScale = new[] { t.lossyScale.x, t.lossyScale.y, t.lossyScale.z },
+                capturedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), frame = Time.frameCount
+            };
         }
 
         private static void AddComponentToObject(AddComponentCommand cmd)
@@ -5805,6 +5840,8 @@ namespace BantworksMCP
                 }
 
                 hierarchy.timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                hierarchy.complete = true;
+                hierarchy.scope = "active_scene";
 
                 string json = JsonUtility.ToJson(hierarchy, true);
                 WriteAtomicText(Path.Combine(StateFolder, "scene-hierarchy.json"), json);
@@ -5817,15 +5854,16 @@ namespace BantworksMCP
 
         private static void AddObjectToHierarchy(GameObject obj, List<GameObjectInfo> list, int depth)
         {
-            list.Add(CreateGameObjectInfo(obj, depth));
-
-            // Recurse into children (limit depth to prevent huge exports)
-            if (depth < 10)
+            // Iterative preorder preserves sibling order without a silent depth cap or call-stack growth.
+            var pending = new Stack<KeyValuePair<GameObject, int>>();
+            pending.Push(new KeyValuePair<GameObject, int>(obj, depth));
+            while (pending.Count > 0)
             {
-                foreach (Transform child in obj.transform)
-                {
-                    AddObjectToHierarchy(child.gameObject, list, depth + 1);
-                }
+                var current = pending.Pop();
+                list.Add(CreateGameObjectInfo(current.Key, current.Value));
+                var transform = current.Key.transform;
+                for (int index = transform.childCount - 1; index >= 0; index--)
+                    pending.Push(new KeyValuePair<GameObject, int>(transform.GetChild(index).gameObject, current.Value + 1));
             }
         }
 
@@ -7404,6 +7442,8 @@ namespace BantworksMCP
         [Serializable]
         private class SceneHierarchy
         {
+            public bool complete;
+            public string scope;
             public string sceneName;
             public string scenePath;
             public List<GameObjectInfo> objects;
@@ -7550,6 +7590,8 @@ namespace BantworksMCP
         [Serializable]
         private class CommandResult
         {
+            public string status;
+            public ObjectTransformReceipt observed;
             public string commandId;
             public bool success;
             public string message;
@@ -7557,6 +7599,15 @@ namespace BantworksMCP
             public long timestamp;
             public string projectPath;
             public string editorInstanceId;
+        }
+
+        [Serializable]
+        private class ObjectTransformReceipt
+        {
+            public string objectId, path, parentId;
+            public float[] worldPosition, worldEulerRotation, localPosition, localEulerRotation, localScale, lossyScale;
+            public long capturedAt;
+            public int frame;
         }
 
         private class PendingPipeCommand

@@ -18,7 +18,7 @@ test("token-saver profile keeps its advertised tool context bounded", () => {
   const coreTools = registerTools(core);
   const names = new Set(coreTools.map((tool) => tool.name));
 
-  assert.equal(coreTools.length, 24);
+  assert.equal(coreTools.length, 25);
   assert.ok(coreBytes <= 24000, "core schema grew to " + coreBytes + " bytes");
   assert.ok(
     coreBytes <= allBytes * 0.6,

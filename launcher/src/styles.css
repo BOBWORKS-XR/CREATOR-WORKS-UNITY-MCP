@@ -774,6 +774,9 @@ h2 {
   50% { opacity: 0.35; }
 }
 
+#feedbackStatus, #updateStatus { overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+
 @media (max-width: 720px) {
   .header,
   .main {
