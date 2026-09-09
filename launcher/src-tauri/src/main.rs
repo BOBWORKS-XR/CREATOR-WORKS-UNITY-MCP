@@ -1,8 +1,8 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod jsonc;
 mod feedback;
+mod jsonc;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -2159,7 +2159,11 @@ fn get_project_feedback_settings(unity_project_path: String) -> Result<serde_jso
 }
 
 #[tauri::command]
-fn set_project_feedback_settings(unity_project_path: String, enabled: bool, usage_check_ins: bool) -> Result<serde_json::Value, String> {
+fn set_project_feedback_settings(
+    unity_project_path: String,
+    enabled: bool,
+    usage_check_ins: bool,
+) -> Result<serde_json::Value, String> {
     feedback::write(&unity_project_path, enabled, usage_check_ins)
 }
 
