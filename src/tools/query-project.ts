@@ -28,6 +28,7 @@ export interface ProjectStateQueryOptions {
 }
 
 interface QuerySummary {
+  sourceCompleteness?: "complete" | "incomplete" | "unknown";
   totalMatches: number;
   returned: number;
   truncated: boolean;
@@ -421,6 +422,8 @@ function readHierarchy(
     ? hierarchy.objects.filter(isRecord)
     : [];
   const selected = selectHierarchyObjects(objects, filter, options);
+  selected.summary.sourceCompleteness = hierarchy.complete === true ? "complete"
+    : hierarchy.complete === false ? "incomplete" : "unknown";
 
   return {
     ...state,
@@ -429,6 +432,8 @@ function readHierarchy(
       objects: selected.items,
     },
     query: selected.summary,
+    warning: [state.warning, hierarchy.complete !== true
+      ? "Snapshot completeness is not verified. Update the bridge and refresh before treating this as a complete inventory." : undefined].filter(Boolean).join(" ") || undefined,
   };
 }
 
@@ -699,6 +704,9 @@ function boundItemsByBytes(
 function boundQueryResult(result: ProjectStateResult): ProjectStateResult {
   if (!result.success || !result.query) return result;
   const summary = result.query;
+  // Keep limits visible even when a client's viewer clips the end of a large response.
+  result = { success: result.success, query: result.query, warning: result.warning,
+    snapshot: result.snapshot, source: result.source, data: result.data };
   const hierarchy = !Array.isArray(result.data) && isRecord(result.data) ? result.data : undefined;
   const items = (hierarchy ? hierarchy.objects : result.data) as Array<Record<string, unknown>>;
   const alreadyTruncated = summary.truncated;
@@ -756,7 +764,7 @@ function readComponentsFromHierarchy(
     return hierarchyResult;
   }
 
-  const hierarchy = hierarchyResult.data as { objects?: Array<Record<string, unknown>> };
+  const hierarchy = hierarchyResult.data as { objects?: Array<Record<string, unknown>>; complete?: boolean };
   const selectedObjects = matchingHierarchyObjects(hierarchy.objects || [], undefined, {
     ...options,
     fields: undefined,
@@ -796,6 +804,7 @@ function readComponentsFromHierarchy(
     ...hierarchyResult,
     data: items,
     query: {
+      sourceCompleteness: hierarchy.complete === true ? "complete" : hierarchy.complete === false ? "incomplete" : "unknown",
       totalMatches,
       returned: items.length,
       truncated: totalMatches > projectedItems.length || bounded.truncated,

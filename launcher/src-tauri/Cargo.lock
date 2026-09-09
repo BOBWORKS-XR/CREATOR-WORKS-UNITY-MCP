@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "creator-works-mcp-launcher"
-version = "2.6.0-rc.1"
+version = "2.6.0"
 dependencies = [
  "dirs 5.0.1",
  "serde",

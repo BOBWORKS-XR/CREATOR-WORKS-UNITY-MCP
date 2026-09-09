@@ -31,6 +31,7 @@ import { registerResources, handleResourceRead } from "./resources/index.js";
 import { registerPrompts, handlePromptGet } from "./prompts/index.js";
 import { getConfig } from "./lib/config.js";
 import { UnityProjectRouter } from "./lib/project-router.js";
+import { MCP_VERSION } from "./lib/version.js";
 
 const projectRouter = new UnityProjectRouter(getConfig());
 let toolGroupSelection: ToolGroupSelection = "all";
@@ -39,7 +40,7 @@ let toolGroupSelection: ToolGroupSelection = "all";
 const server = new Server(
   {
     name: "creator-works-mcp",
-    version: "2.6.0-rc.1",
+    version: MCP_VERSION,
   },
   {
     capabilities: {

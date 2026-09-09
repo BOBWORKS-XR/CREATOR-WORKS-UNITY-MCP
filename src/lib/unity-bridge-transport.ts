@@ -11,6 +11,8 @@ const BRIDGE_HEARTBEAT_MAX_AGE_MS = 10_000;
 const PIPE_RESPONSE_LIMIT_BYTES = 64 * 1024;
 
 export interface BridgeCommandResult {
+  status?: "dispatched" | "completed";
+  observed?: Record<string, unknown>;
   commandId?: string;
   success?: boolean;
   message?: string;

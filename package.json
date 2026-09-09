@@ -1,6 +1,6 @@
 {
   "name": "creator-works-mcp",
-  "version": "2.6.0-rc.1",
+  "version": "2.6.0",
   "description": "Codex, Claude Code, Antigravity, OpenCode, and MCP-compatible Unity integration with first-class Creator SDK and Banter knowledge",
   "type": "module",
   "main": "dist/index.js",
@@ -47,7 +47,7 @@
   "overrides": {
     "@hono/node-server": "2.0.11",
     "fast-uri": "3.1.6",
-    "hono": "4.13.0",
+    "hono": "4.13.5",
     "ip-address": "10.4.0"
   }
 }

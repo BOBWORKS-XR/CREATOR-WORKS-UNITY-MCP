@@ -8,7 +8,8 @@ const tauriVersion = JSON.parse(
 const cargoManifest = readFileSync("launcher/src-tauri/Cargo.toml", "utf8");
 const cargoVersion = cargoManifest.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 const serverSource = readFileSync("src/index.ts", "utf8");
-const serverVersion = serverSource.match(/name:\s*"creator-works-mcp",\s*\n\s*version:\s*"([^"]+)"/)?.[1];
+assert.match(serverSource, /version:\s*MCP_VERSION/);
+const serverVersion = readFileSync("src/lib/version.ts", "utf8").match(/MCP_VERSION\s*=\s*"([^"]+)"/)?.[1];
 const launcherHtml = readFileSync("launcher/src/index.html", "utf8");
 const launcherUiVersion = launcherHtml.match(/id="appVersion">v([^<]+)</)?.[1];
 const unityBridge = readFileSync("unity-extension/Editor/BanterMCPBridge.cs", "utf8");

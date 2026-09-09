@@ -1,8 +1,9 @@
 # Token Optimization Options and Next Phase
 
-Updated 2026-09-08. This is a proposed work split, not dispatched tasks or a
-promise of savings against any provider's account quota. The 2.6.0-rc.1
-prerelease packages the implemented work; it does not complete runtime acceptance.
+Updated 2026-09-09. This is a proposed work split, not dispatched tasks or a
+promise of savings against any provider's account quota. The 2.6.0 stable line
+adds source-backed hierarchy/status fixes and optional local feedback/update
+checks; stable packaging does not complete every project's runtime acceptance.
 
 ## Options Without Confusing the Tradeoffs
 
@@ -28,7 +29,7 @@ reuse are client-controlled, not an MCP account-budget guarantee.
 
 | Workstream | Scope | Completion evidence |
 | --- | --- | --- |
-| A: Package and upgrade acceptance | Windows build and staged source/server/bridge checks passed for 2.6.0-rc.1; platform packaging runs in tagged CI. Next: clean install and upgrade while preserving client profiles | Installed payload hashes; 52 tools in Full, 24 in core; reference and bounded-query calls from the installed payload; Linux/macOS install and client reconnect acceptance |
+| A: Package and upgrade acceptance | Stable 2.6.0 packaging with the initial token-efficiency features and reviewed hotfixes. Next: clean install and upgrade while preserving client profiles | Installed payload hashes; 53 tools in Full, 25 in core; reference and bounded-query calls from the installed payload; Linux/macOS install and client reconnect acceptance |
 | B: Task-level efficiency and behavior | Same tasks in disposable Unity-only and Creator/Banter projects: large hierarchies, error storms, complex/embedded graphs, and queued commands during project switching | Total tool input/output bytes, calls, retries, time and validation; no false completion or wrong-project verification; client tokens where available; no new Editor hitches |
 | C: Graph artifact design | Design a small opt-in handle-based generate/validate/write path, leaving existing JSON tools compatible | Same graphs and validators, no stale or cross-project artifact reuse; measured round-trip byte reduction before adoption |
 | D: Unity interoperability probe | Existing stdio server in documented Assistant extensions first; optional Pipeline commands only if beneficial | Exact package versions, correct project selection, bounded replies, errors/reloads tested; no duplicate generic tools or internal Unity APIs |
@@ -41,6 +42,13 @@ Coordinate with concurrent Built-in-to-URP conversion work before merging or
 packaging shared source. This branch does not own render-pipeline conversion.
 
 ## Later Order
+
+Architectural-feedback follow-ups: snapshot-bound pagination, batch bounds,
+previewed rename operations, and reversible interior captures. Investigate the
+reported parenting issue with exact caller/bridge versions before changing it.
+Background installer staging needs authenticated artifact verification, bounded
+storage/downloads, cancellation, rollback and install-time process checks. The
+current release only checks public stable metadata and opens the release page.
 
 1. Preview-first Creator SDK setup using verified registry/package metadata.
 2. Fresh-state preconditions and conflict responses for mixed manual/MCP edits.

@@ -2,12 +2,12 @@
 
 Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[Try 2.6.0-rc.1 (prerelease)](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0-rc.1) | [Stable 2.5.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1) | [Release notes](docs/releases/2.6.0-rc.1.md) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+[Download 2.6.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0) | [Release notes](docs/releases/2.6.0.md) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
 
-**2.6.0-rc.1 is a testing release, not a stable upgrade.** It focuses on smaller
-AI context, more precise scene inspection, and reliable compile/reload waits.
-It also includes FireRat's Linux/macOS packaging and optional test-run controls.
-Keep a backup and test your normal workflow before adopting it across projects.
+**2.6.0 brings the first token-efficiency release to stable**, with deep-hierarchy
+and command-status fixes, measured transform receipts, optional local feedback,
+and update notifications. It includes FireRat's Linux/macOS packaging and test-run
+controls. Keep a backup and verify your own SDK/project workflow after upgrading.
 
 ![Creator Works MCP configured Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
 
@@ -22,15 +22,19 @@ Keep a backup and test your normal workflow before adopting it across projects.
 - **Native Visual Scripting:** generates, validates, writes, imports, and checks Unity Visual Scripting graphs using a source-observed custom-node catalogue and SDK validator
 - **Experimental Shader Graph tooling:** inspects real nodes, slots, and targets, uses content hashes for concurrency, protects occupied inputs, and verifies rollback after failed writes
 - **Testing and diagnostics:** exposes compiler status, filtered Console logs, Unity Test Framework runs, screenshots, import status, package metadata, and bounded hierarchy queries
-- **Token-aware setup:** new installations expose a compact 24-tool core profile, with specialist capabilities available as opt-in profiles
+- **Token-aware setup:** new installations expose a compact 25-tool core profile, with specialist capabilities available as opt-in profiles
+- **Optional feedback:** private project Markdown notes and consent-based usage check-ins; no automatic uploads or account access
+- **Release notifications:** manual checks, plus opt-in automatic stable-release checks; installation stays manual
 - **Low-overhead local bridge:** keeps command polling responsive without repeatedly serializing an unchanged scene hierarchy
 
-## What to Expect in 2.6.0-rc.1
+## What to Expect in 2.6.0
 
-- **Less context spent on setup:** new configurations default to 24 core tools instead of all 52. This reduces measured tool-schema bytes by about 54%, not your total token bill. Existing Full selections stay Full.
+- **Less context spent on setup:** new configurations default to 25 core tools instead of all 53. This reduces measured tool-schema bytes by about 52%, not your total token bill. Existing Full selections stay Full.
 - **Smaller documentation and scene replies:** focused reference lookup includes corrections, and bounded inspection replies report omitted or missing data. Full references and larger explicit reads remain available.
 - **Keep specialist capabilities:** select **Full Unity + Banter** for every tool, or a focused Banter, Unity authoring, Testing, or Shader Graph profile, then reconnect the client. Full also benefits from bounded replies and focused references.
 - **More dependable Editor feedback:** identity-only component queries avoid serialized property dumps, missing properties are explicit, and compile waits account for domain reload. A pending command reports how to resume polling instead of encouraging duplicate edits.
+- **Complete-depth snapshots and clearer receipts:** full active-scene snapshots no longer drop children below depth 10. Query limits appear before the data, and create/modify results distinguish requested transforms from observed values.
+- **Long-command visibility:** dispatch records survive a blocked pipe reply or heartbeat. A dispatched status does not claim that an asynchronous build finished, or that a stalled process is still running.
 - **More control over testing:** optionally disable unfiltered Unity test runs. The policy is project-scoped and survives domain reload; the compatible default still allows them.
 - **More distribution options:** Windows x64 EXE, Linux x86_64 AppImage/DEB/RPM, macOS Apple Silicon DMG, and a standalone Node.js ZIP. Platform packaging checks are not the same as real installation and Unity-session acceptance.
 
@@ -42,7 +46,7 @@ installer, Unity AI integration, or a player emulator.
 
 ## Quick Start
 
-1. For the candidate, download the Windows x64 setup EXE from [2.6.0-rc.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0-rc.1). For the stable release, use [2.5.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1). Linux/macOS testers can use the candidate's matching package.
+1. Download the Windows x64 setup EXE or the matching Linux/macOS package from [2.6.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0).
 2. Open **Creator Works MCP** and choose a Unity project.
 3. Select the MCP clients you want to configure.
 4. Press **Set Up Creator Works MCP**.
@@ -100,13 +104,13 @@ Targeted hierarchy queries serialize only the requested subtree or matching comp
 
 ## Token Use
 
-This section describes the 2.6.0-rc.1 prerelease, not the stable 2.5.1
-installer. Source tests do not replace real-project and installer acceptance.
+This section describes 2.6.0. Source tests do not replace real-project and
+installer acceptance.
 
 New launcher and setup configurations default to the `core` profile. It exposes
-24 general inspection and scene-authoring tools instead of all 52 schemas.
-Current source measurement is 21,827 schema bytes for `core` versus 47,268 for
-`all`, a 54% reduction before the user's prompt or any tool result is counted.
+25 general inspection, scene-authoring, and optional-feedback tools instead of all 53 schemas.
+Current source measurement is 23,172 schema bytes for `core` versus 48,613 for
+`all`, about 52% less before the user's prompt or any tool result is counted.
 Actual tokens vary by MCP client and model; run `npm run measure:context` for the
 current byte counts, on-demand resource sizes, and rough estimates.
 
@@ -152,6 +156,29 @@ for backward compatibility.
 Compile waits tolerate domain reload until their deadline and require a fresh,
 settled Editor before confirming readiness. A command timeout is not cancellation:
 follow its project-bound polling instructions instead of submitting it again.
+
+## Local Feedback and Updates
+
+Both features are optional. In **Feedback & Updates**, enable local feedback for
+the selected project. Notes live at `.bantworks-mcp/feedback/MCP_FEEDBACK.md`,
+outside `Assets`, with a local Git ignore file. Nothing is uploaded automatically;
+existing tracked files remain tracked. Review private content before sharing.
+
+The `project_feedback` tool can record a bounded attempted action, actual result,
+impact, and client/model. A separate opt-in enables usage check-ins at completed
+task boundaries: at least five unique tasks and 24 hours between questions.
+The AI client must call `task_complete`; this is not a timer-driven Unity popup.
+Skipping is fine. Usage is only what a user volunteers and explicitly permits
+recording, not account scraping, exact token metering, or proof of savings.
+Preferences and reminder state survive server restarts. Disable either option
+without deleting existing notes. See [feedback guidance](FEEDBACK.md).
+
+**Check for Updates** reads public GitHub stable-release metadata. Automatic
+checking is off by default; when enabled, checks run at launcher startup and
+every six hours while it is open. GitHub receives the normal network request,
+not project data or usage logs. No installer downloads, installation, application
+shutdown, or project bridge updates happen automatically. Save work, install when
+ready, then deliberately update project bridges and reconnect MCP clients.
 
 ## MCP Clients
 
@@ -229,7 +256,7 @@ These project screenshots show scene hierarchy construction, configured Banter c
 - [Bridge protocol](docs/bridge-protocol.md)
 - [Compatibility matrix](docs/compatibility.md)
 - [Tool groups](docs/tool-groups.md)
-- [2.6.0-rc.1 changes and upgrade guidance](docs/releases/2.6.0-rc.1.md)
+- [2.6.0 changes and upgrade guidance](docs/releases/2.6.0.md)
 - [Token optimization evidence and next phase](docs/token-optimization-next-phase.md)
 - [Banter custom Visual Scripting nodes](docs/banter-custom-visual-scripting-nodes.md)
 - [SideQuest workflows](docs/banter-workflows.md)

@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod jsonc;
+mod feedback;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -47,6 +48,8 @@ struct LauncherConfig {
     allow_all_tests: bool,
     #[serde(default = "default_tool_groups")]
     tool_groups: String,
+    #[serde(default)]
+    automatic_update_checks: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -691,6 +694,7 @@ fn load_config(app: tauri::AppHandle) -> Result<LauncherConfig, String> {
             enable_custom_scripts: false,
             allow_all_tests: true,
             tool_groups: default_tool_groups(),
+            automatic_update_checks: false,
         })
     }
 }
@@ -2086,6 +2090,8 @@ fn main() {
             set_unity_custom_scripts,
             set_unity_allow_all_tests,
             get_onboarding_status,
+            get_project_feedback_settings,
+            set_project_feedback_settings,
             one_click_setup,
         ])
         .run(tauri::generate_context!())
@@ -2147,6 +2153,16 @@ fn set_unity_allow_all_tests(unity_project_path: String, enabled: bool) -> Resul
     })
 }
 
+#[tauri::command]
+fn get_project_feedback_settings(unity_project_path: String) -> Result<serde_json::Value, String> {
+    feedback::read(&unity_project_path)
+}
+
+#[tauri::command]
+fn set_project_feedback_settings(unity_project_path: String, enabled: bool, usage_check_ins: bool) -> Result<serde_json::Value, String> {
+    feedback::write(&unity_project_path, enabled, usage_check_ins)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2204,6 +2220,7 @@ mod tests {
             enable_custom_scripts: false,
             allow_all_tests: true,
             tool_groups: " ShaderGraph, Read, read ".to_string(),
+            automatic_update_checks: false,
         };
         let replacement = Path::new("D:/installed/server/creator-works-mcp.mjs");
 
