@@ -1,12 +1,14 @@
 [package]
 name = "creator-works-mcp-launcher"
-version = "2.6.0"
+version = "2.7.0-alpha.1"
 description = "Creator Works MCP Configuration Launcher"
 authors = ["Creator Works"]
+license = "MIT"
 edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+sha2 = "0.10"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -15,11 +17,13 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
+sha2 = "0.10"
 dirs = "5"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
 
 [features]
 default = ["custom-protocol"]

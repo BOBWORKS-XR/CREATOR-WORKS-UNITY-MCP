@@ -52,3 +52,5 @@ export async function checkStableUpdate(currentVersion, fetcher = fetch) {
     return stableUpdate(currentVersion, JSON.parse(new TextDecoder().decode(bytes)));
   } finally { clearTimeout(timer); }
 }
+
+if (typeof window !== 'undefined') window.CreatorUpdates = Object.freeze({ stableUpdate, checkStableUpdate });

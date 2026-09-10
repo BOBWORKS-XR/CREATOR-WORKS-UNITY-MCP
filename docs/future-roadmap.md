@@ -99,6 +99,36 @@ Required design:
 This is intentionally future work, not part of the current token-optimization
 implementation.
 
+## Community Tools and Reusable MCP Helpers
+
+Added 2026-09-10. Future scope only, after installer, migration and Hub adoption
+blockers. Creator Hub owns the reviewed community directory alongside packages
+and plugins; MCP may help prepare local contribution drafts, not a second index.
+
+Goal: preserve useful AI/MCP-created C# utilities instead of discarding them.
+At a natural task boundary, offer Keep local, Prepare contribution, or Skip at
+most once per artifact. Declining must not affect normal MCP functionality.
+
+- Keep feedback private by default. Sharing requires explicit author consent.
+- A small, bounded source sample may accompany a feedback draft. Larger source
+  stays in a separate local file with its hash and a link, not repeated in every
+  tool response. Alternatively, list the author's public repository at an exact
+  reviewed version or commit, only after permission to share it.
+- Require ownership, an explicit license, dependencies, Unity/SDK versions,
+  test notes, limitations, Editor-only/runtime scope and declared side effects.
+- Review for credentials, private paths, client configuration, proprietary
+  assets and unrelated code. AI-generated origin is not a safety guarantee or
+  proof that purchased assets can be redistributed.
+- Initial listings expose reviewed metadata and source links only. Do not
+  auto-upload feedback, publish drafts, execute or compile submissions, or copy
+  helpers into Unity Assets. Any later installation needs separate target,
+  consent, dependency, conflict, backup and removal checks.
+- Bonto is an unverified possible future adapter, not a selected integration.
+  Verify its supported contract before making implementation commitments.
+
+Compilation checks remain distinct from headset and multiplayer acceptance.
+No submission endpoint or community installation capability is enabled here.
+
 ## Player Interaction Emulator (Last)
 
 Goal: deterministic Editor-side testing of common interactions that are

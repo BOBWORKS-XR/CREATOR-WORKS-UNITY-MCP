@@ -50,6 +50,15 @@ jobs:
         working-directory: launcher/src-tauri
       - run: cargo test
         working-directory: launcher/src-tauri
+      - name: Build Windows Hub metadata executable
+        run: cargo build --release --locked
+        working-directory: launcher/src-tauri
+      - name: Verify read-only Hub identity from GUI executable
+        shell: pwsh
+        run: |
+          $binary = (Resolve-Path './launcher/src-tauri/target/release/creator-works-mcp-launcher.exe').Path
+          $hash = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant()
+          node ./scripts/smoke-creator-hub-info.mjs $binary $hash
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Help
 
   launcher-linux:

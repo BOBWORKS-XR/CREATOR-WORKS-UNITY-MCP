@@ -1,0 +1,83 @@
+name: Windows installer acceptance (test only)
+
+on:
+  # New workflows cannot be manually dispatched until present on the default branch.
+  # Only an explicitly approved test-branch push may start this first acceptance run.
+  push:
+    branches:
+      - feature/creator-hub-compatibility
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-startup:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Verify test process startup on Windows PowerShell
+        shell: powershell
+        run: |
+          .\test\fixtures\owned-node-startup.ps1 -NodePath (Get-Command node.exe).Source
+          $baseline = Join-Path $env:RUNNER_TEMP 'mcp-baseline.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/download/v2.6.0/Creator.Works.MCP_2.6.0_x64-setup.exe' -OutFile $baseline
+          if ((Get-FileHash -LiteralPath $baseline -Algorithm SHA256).Hash.ToLowerInvariant() -ne '11d6fc0fb95e33023a90a8722cf9234f82de6e175689bd915401bac3d49bc8c2') { throw 'Baseline hash mismatch.' }
+          $out = Join-Path $env:RUNNER_TEMP 'Legacy Creator Works MCP'
+          & 7z.exe x $baseline ('-o' + $out) 'server/runtime/node.exe' '-y' | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline runtime extraction failed.' }
+          .\test\fixtures\owned-node-startup.ps1 -NodePath (Join-Path $out 'server\runtime\node.exe')
+  installed-upgrade:
+    needs: fixture-startup
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm test
+      - run: npm run check:version
+      - run: npm run release:launcher
+      - name: Read reviewed license tooling revision
+        id: notices
+        shell: pwsh
+        run: |
+          $pin = Get-Content scripts/notices-tool.json -Raw | ConvertFrom-Json
+          "revision=$($pin.revision)" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@v6
+        with:
+          repository: BOBWORKS-XR/CREATOR-HUB
+          ref: ${{ steps.notices.outputs.revision }}
+          path: artifacts/notices-tool
+          persist-credentials: false
+      - run: node scripts/prepare-installer-notices.mjs
+      - run: npm audit --audit-level=low
+      - run: cargo test --release
+        working-directory: launcher/src-tauri
+      - run: npx --yes @tauri-apps/cli@2.9.6 build --bundles nsis --config ../release/tauri-notices.json -- --locked
+        working-directory: launcher
+      - name: Native installed upgrade on disposable runner only
+        shell: powershell
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          .\scripts\test-installed-upgrade-ci.ps1 -Installer "launcher\src-tauri\target\release\bundle\nsis\Creator Works MCP_${version}_x64-setup.exe"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-installer-acceptance
+          path: artifacts/installed-upgrade-ci/
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: mcp-windows-prerelease-candidate
+          path: launcher/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

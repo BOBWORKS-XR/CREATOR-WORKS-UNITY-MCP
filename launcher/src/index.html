@@ -9,11 +9,43 @@
 <body>
   <div class="app">
     <header class="header">
+      <div class="app-scrim" id="appSwitcherScrim" aria-hidden="true"></div>
+      <div class="app-switcher">
+        <div class="app-shell" id="appSwitcherShell">
+        <div class="app-drawer-title" aria-hidden="true"><span><span class="brand-creator">CREATOR</span> <span class="brand-works">WORKS</span></span><span>MCP</span></div>
+        <button class="app-tab" id="appSwitcherToggle" type="button" aria-label="Creator apps" aria-haspopup="menu" aria-expanded="false" aria-controls="appSwitcherMenu" title="Creator apps">
+          <span class="app-icon" aria-hidden="true"><img src="creator-works-logo.png" alt=""><span class="app-letter">M</span></span>
+        </button>
+        <div class="app-menu" id="appSwitcherMenu" inert aria-hidden="true">
+          <div role="menu" aria-label="Creator apps">
+          <a class="app-menu-item" role="menuitem" tabindex="-1" data-app-link="hub" title="View the Creator Hub development plan" href="https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md">
+            <span class="app-icon app-icon-hub" aria-hidden="true"><img src="creator-works-logo.png" alt=""><span class="app-letter">H</span></span>
+            <span class="app-menu-copy"><strong>Creator Hub</strong><small>In development</small></span><span class="icon icon-external" aria-hidden="true"></span>
+          </a>
+          <button class="app-menu-item" type="button" role="menuitem" tabindex="-1" aria-current="page">
+            <span class="app-icon" aria-hidden="true"><img src="creator-works-logo.png" alt=""><span class="app-letter">M</span></span>
+            <span class="app-menu-copy"><strong>Creator Works MCP</strong><small>Current app</small></span><span class="app-current-dot" aria-hidden="true"></span>
+          </button>
+          <a class="app-menu-item" role="menuitem" tabindex="-1" data-app-link="setup" href="https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases">
+            <span class="app-icon" aria-hidden="true"><img src="creator-works-logo.png" alt=""><span class="app-letter">P</span></span>
+            <span class="app-menu-copy"><strong>Creator Project Setup</strong><small>Releases</small></span><span class="icon icon-external" aria-hidden="true"></span>
+          </a>
+          <button class="app-menu-item" type="button" role="menuitem" tabindex="-1" aria-disabled="true">
+            <span class="app-icon app-icon-converter" aria-hidden="true"><img src="sidequest-mark-white.svg" alt=""><span class="app-letter">C</span></span>
+            <span class="app-menu-copy"><strong>Creator Converter</strong><small>SideQuest / Coming soon</small></span>
+          </button>
+          <button class="app-menu-item" type="button" role="menuitem" tabindex="-1" aria-disabled="true">
+            <span class="app-icon" aria-hidden="true"><img src="creator-works-logo.png" alt=""><span class="app-letter">PL</span></span>
+            <span class="app-menu-copy"><strong>Creator Plugins</strong><small>Coming soon</small></span>
+          </button>
+          </div>
+        </div>
+        </div>
+      </div>
       <div class="logo">
-        <img class="logo-mark" src="creator-works-logo.png" alt="">
         <div class="brand-lockup">
           <h1 class="brand-title"><span class="brand-creator">CREATOR</span> <span class="brand-works">WORKS</span> <span class="brand-mcp">MCP</span></h1>
-          <span class="preview-label">Shader Graph Preview</span>
+          <span class="app-context">Unity project connections</span>
         </div>
       </div>
       <div class="status" id="status" role="status">
@@ -23,10 +55,18 @@
     </header>
 
     <main class="main">
+      <section id="hostedPreview" class="hosted-preview" hidden aria-label="Hosted MCP preview">
+        <div><strong>Read-only Hub preview</strong><p id="hostedPreviewStatus" role="status">Configuration changes and bridge updates are disabled.</p></div>
+        <div class="hosted-preview-actions">
+          <button id="hostedRefresh" class="btn btn-secondary" type="button">Refresh</button>
+          <button id="hostedBrowse" class="btn btn-secondary" type="button">Browse folder</button>
+        </div>
+        <output id="hostedPickedFolder"></output>
+      </section>
+      <fieldset class="workspace-controls" id="workspaceControls" aria-label="MCP configuration" disabled>
       <section class="section setup-section">
         <div class="section-header">
           <div>
-            <p class="eyebrow">FIRST RUN</p>
             <h2>Quick Setup</h2>
           </div>
           <span class="runtime-badge" id="runtimeBadge">Runtime</span>
@@ -40,7 +80,7 @@
                 <input type="text" id="projectPath" class="input" placeholder="Select a Unity project folder">
                 <button class="btn btn-secondary" id="browseProjectBtn" type="button">Browse</button>
               </div>
-              <select id="discoveredProjects" class="input select-input recent-projects">
+              <select id="discoveredProjects" class="input select-input recent-projects" aria-label="Recent Unity projects">
                 <option value="">Recent Unity projects</option>
               </select>
             </div>
@@ -220,13 +260,17 @@
           </div>
         </div>
       </details>
+      </fieldset>
     </main>
 
     <footer class="footer">
-      <p><span class="brand-creator">CREATOR</span> <span class="brand-works">WORKS</span> MCP <span id="appVersion">v2.6.0</span> <span class="footer-separator">|</span> <a href="#" id="githubLink">GitHub</a></p>
+      <p>Creator Works MCP <span id="appVersion">v2.7.0-alpha.1</span> <span class="footer-separator">|</span> <a href="#" id="githubLink">GitHub</a></p>
     </footer>
   </div>
 
+  <script src="runtime.js"></script>
+  <script type="module" src="updates.js"></script>
   <script type="module" src="app.js"></script>
+  <script type="module" src="app-chrome.js"></script>
 </body>
 </html>
