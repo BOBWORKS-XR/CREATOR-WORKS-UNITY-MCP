@@ -17,7 +17,7 @@ const files = new Map([
   ['/styles.css', ['styles.css', 'text/css']], ['/app.js', ['app.js', 'text/javascript']],
   ['/app-chrome.js', ['app-chrome.js', 'text/javascript']],
   ['/updates.js', ['updates.js', 'text/javascript']], ['/creator-works-logo.png', ['creator-works-logo.png', 'image/png']],
-  ['/icons/x.svg', ['icons/x.svg', 'image/svg+xml']], ['/icons/external-link.svg', ['icons/external-link.svg', 'image/svg+xml']]
+  ['/icons/external-link.svg', ['icons/external-link.svg', 'image/svg+xml']]
 ]);
 const server = http.createServer(async (request, response) => {
   const entry = files.get(new URL(request.url, 'http://localhost').pathname);
@@ -107,7 +107,7 @@ try {
       await page.screenshot({path:path.join(output,label + '-failed.png'),fullPage:true});
     }
     assert.equal(geometry.scroll, geometry.viewport, label + ': horizontal overflow');
-    assert.deepEqual(geometry.tab, {x:0,w:54,h:48});
+    assert.deepEqual(geometry.tab, {x:-1,w:54,h:46});
     assert.equal(geometry.titleX,76);
     if (width > 520) assert.equal(geometry.headerHeight, 72);
     assert.match(geometry.font, /Segoe UI/);
@@ -126,7 +126,28 @@ try {
   await page.setViewportSize({width:900,height:700});
   const toggle = page.locator('#appSwitcherToggle');
   const menu = page.locator('#appSwitcherMenu');
+  const shell = page.locator('#appSwitcherShell');
   const items = menu.getByRole('menuitem');
+  async function closed() {
+    assert.equal(await toggle.getAttribute('aria-expanded'),'false');
+    assert.equal(await menu.evaluate(el => el.inert),true);
+    assert.equal(await items.count(),0);
+    await page.waitForFunction(() => {
+      const shell = document.getElementById('appSwitcherShell');
+      return shell.getBoundingClientRect().width === 55 &&
+        getComputedStyle(document.getElementById('appSwitcherMenu')).visibility === 'hidden';
+    });
+    assert.equal(await menu.isVisible(),false);
+  }
+  async function expanded() {
+    await page.waitForFunction(() => {
+      const shell = document.getElementById('appSwitcherShell').getBoundingClientRect();
+      return shell.width === 224 && shell.height === Math.min(294, innerHeight - 24) &&
+        getComputedStyle(document.getElementById('appSwitcherMenu')).opacity === '1';
+    });
+    assert.equal(await menu.evaluate(el => el.inert),false);
+    assert.equal(await page.locator('.brand-lockup').evaluate(el => getComputedStyle(el).opacity),'0');
+  }
   await toggle.focus();
   await page.keyboard.press('Enter');
   assert.equal(await items.nth(0).evaluate(el => el === document.activeElement), true);
@@ -138,42 +159,61 @@ try {
   await page.keyboard.press('Home');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
-  assert.equal(await menu.isVisible(), false);
+  await closed();
   assert.equal(await toggle.evaluate(el => el === document.activeElement), true);
   await toggle.press('ArrowDown');
   await page.keyboard.press('End');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   assert.deepEqual(await page.evaluate(() => fixture.links), ['https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases']);
+  await closed();
   await toggle.press('ArrowDown');
   await page.keyboard.press('Escape');
-  assert.equal(await menu.isVisible(), false);
+  await closed();
   assert.equal(await toggle.evaluate(el => el === document.activeElement), true);
   await toggle.click();
-  await page.locator('#appSwitcherClose').click();
-  assert.equal(await menu.isVisible(), false);
+  await expanded();
   await toggle.click();
-  await page.locator('#runtimeBadge').click();
-  assert.equal(await menu.isVisible(), false);
+  await closed();
+  await toggle.click();
+  await expanded();
+  const setupPosition = await page.locator('#setupBtn').boundingBox();
+  await page.mouse.move(setupPosition.x + setupPosition.width / 2, setupPosition.y + setupPosition.height / 2);
+  await page.mouse.down();
+  assert.equal(await toggle.getAttribute('aria-expanded'),'true', 'pointerdown must not dismiss scrim early');
+  await page.mouse.up();
+  await closed();
+  assert.equal(await page.evaluate(() => fixture.calls.filter(c => c.name === 'one_click_setup').length),0);
+  await toggle.click();
+  await expanded();
+  const bridgesPosition = await page.locator('#updateBridgesBtn').boundingBox();
+  await page.mouse.click(bridgesPosition.x + bridgesPosition.width / 2, bridgesPosition.y + bridgesPosition.height / 2);
+  await closed();
+  assert.equal(await page.evaluate(() => fixture.calls.filter(c => c.name === 'update_configured_unity_extensions').length),0);
+  checks.push('click-away consumes setup and bridge-update clicks without invoking either operation');
   await toggle.click();
   await page.keyboard.press('Tab');
-  assert.equal(await menu.isVisible(), false);
+  await closed();
   assert.equal(await page.locator('#projectPath').evaluate(el => el === document.activeElement), true);
   await toggle.click();
   await page.keyboard.press('Shift+Tab');
-  assert.equal(await menu.isVisible(), false);
+  await closed();
   await toggle.click();
-  assert.equal(await menu.evaluate(el => el.getBoundingClientRect().width), 224);
+  await expanded();
+  assert.equal(await shell.evaluate(el => el.getBoundingClientRect().width),224);
   await page.screenshot({path:path.join(output,'desktop-menu.png')});
   await page.keyboard.press('Escape');
+  await closed();
   await toggle.click();
   await items.nth(0).click();
   assert.equal(await page.evaluate(() => fixture.links.at(-1)),
     'https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md');
+  await closed();
   await page.evaluate(() => { fixture.errors.link = true; });
   await toggle.click();
   await items.nth(0).click();
   await page.getByRole('alert').filter({hasText:'Could not open the public page'}).waitFor();
+  await closed();
   await page.evaluate(() => { fixture.errors.link = false; document.querySelector('.toast')?.remove(); });
   checks.push('menu keyboard, current/disabled entries, public release link, Escape, Tab and outside dismissal');
 
@@ -246,7 +286,93 @@ try {
   await layout('narrow-320',320,700);
   await page.evaluate(() => scrollTo(0,0));
   await toggle.click();
+  await expanded();
   await page.screenshot({path:path.join(output,'narrow-menu.png')});
+  await page.keyboard.press('Escape');
+  await closed();
+  await page.setViewportSize({width:900,height:700});
+  const motion = await page.evaluate(async () => {
+    const shell = document.getElementById('appSwitcherShell');
+    const tab = document.getElementById('appSwitcherToggle');
+    const rect = () => {
+      const r = document.querySelector('.main').getBoundingClientRect();
+      return [r.x,r.y,r.width,r.height,scrollY];
+    };
+    const baseline = rect();
+    const samples = [];
+    const start = performance.now();
+    tab.click();
+    do {
+      await new Promise(requestAnimationFrame);
+      const r = shell.getBoundingClientRect();
+      samples.push({ms:Math.round(performance.now()-start),w:r.width,h:r.height,
+        tabX:tab.getBoundingClientRect().x,bodyStable:JSON.stringify(rect()) === JSON.stringify(baseline),
+        shellScroll:shell.scrollTop});
+    } while (performance.now() - start < 300);
+    return samples;
+  });
+  assert.ok(motion.some(s => s.w > 55 && s.w < 224 && s.h > 48 && s.h < 294), 'intermediate animation frames');
+  assert.ok(motion.every(s => s.bodyStable && s.shellScroll === 0), 'drawer must not resize/scroll the body or frame');
+  assert.equal(motion.at(-1).w,224);
+  assert.equal(motion.at(-1).tabX,168);
+  await expanded();
+  await page.keyboard.press('Escape');
+  await closed();
+  const reversed = await page.evaluate(async () => {
+    const toggle = document.getElementById('appSwitcherToggle');
+    const menu = document.getElementById('appSwitcherMenu');
+    toggle.click();
+    await new Promise(requestAnimationFrame);
+    toggle.click();
+    const inertImmediately = menu.inert && menu.getAttribute('aria-hidden') === 'true';
+    menu.querySelector('[role="menuitem"]').focus();
+    return {inertImmediately,focusRetained:document.activeElement === toggle};
+  });
+  assert.deepEqual(reversed,{inertImmediately:true,focusRetained:true});
+  await closed();
+
+  // Pause actual CSS transitions only for an inspectable intermediate screenshot.
+  await page.evaluate(() => {
+    document.getElementById('appSwitcherToggle').click();
+    document.getElementById('appSwitcherShell').getBoundingClientRect();
+    window.fixture.motionAnimations = document.getAnimations();
+    for (const animation of fixture.motionAnimations) { animation.pause(); animation.currentTime = 90; }
+  });
+  await page.screenshot({path:path.join(output,'drawer-midmotion.png')});
+  await page.evaluate(() => { for (const animation of fixture.motionAnimations) animation.finish(); });
+  await expanded();
+  await page.keyboard.press('Escape');
+  await closed();
+  checks.push('intermediate morph frames, moving logo, stable body/frame, reversal and immediate inert focus protection');
+
+  await page.setViewportSize({width:560,height:240});
+  await toggle.press('ArrowUp');
+  await expanded();
+  const short = await menu.evaluate(el => {
+    const shell = document.getElementById('appSwitcherShell').getBoundingClientRect();
+    const last = el.querySelector('[aria-disabled="true"]').getBoundingClientRect();
+    return {shellBottom:shell.bottom,scroll:el.scrollTop,lastBottom:last.bottom,active:document.activeElement === el.querySelector('[aria-disabled="true"]')};
+  });
+  assert.ok(short.shellBottom <= 228 && short.lastBottom <= short.shellBottom && short.scroll > 0 && short.active);
+  await page.screenshot({path:path.join(output,'drawer-short-window.png')});
+  await page.keyboard.press('Home');
+  assert.equal(await menu.evaluate(el => el.scrollTop),6);
+  await page.keyboard.press('Escape');
+  await closed();
+  checks.push('short viewport drawer scroll and keyboard access to all entries');
+
+  await page.setViewportSize({width:900,height:700});
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await toggle.click();
+  await expanded();
+  const reduced = await page.evaluate(() => [...document.querySelectorAll('.app-shell,.app-scrim,.app-menu,.app-drawer-title,.brand-lockup')]
+    .map(el => ({duration:getComputedStyle(el).transitionDuration,transform:getComputedStyle(el).transform})));
+  assert.ok(reduced.every(value => value.duration === '0s' && value.transform === 'none'));
+  await page.screenshot({path:path.join(output,'drawer-reduced-motion.png')});
+  await toggle.click();
+  await closed();
+  checks.push('reduced-motion disables all drawer and title transitions');
+  await fs.writeFile(path.join(output,'motion-results.json'),JSON.stringify({motion,reversed,short,reduced},null,2) + '\n');
   assert.deepEqual(failures,[]);
   const report = {success:true, checks, limitations:'Mocked browser/Tauri only. No native GUI, real setup, install or Unity runtime actions performed.'};
   await fs.writeFile(path.join(output,'results.json'),JSON.stringify(report,null,2) + '\n');

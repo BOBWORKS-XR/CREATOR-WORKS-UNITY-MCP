@@ -115,7 +115,15 @@ The final shared alignment uses a 72px header, 19px title, 13px body and 15px
 section headings. The original bitmap is unchanged (SHA-256
 `f3f68baa0d887de92e6cf7aba8beae7ff8ea5c44b13444f018413041ade19ea7`).
 
-- Fixed left-edge tab: 54x48 at x=0/y=12; menu: 224px at x=8/y=68.
+- One fixed left-attached drawer frame at x=-1/y=12: 55x48 collapsed,
+  224x294 expanded, limited to viewport height minus 24px. The 54x46 logo
+  button slides to the right as the frame expands and toggles it closed.
+  There is no separate floating menu, close X or "Creator apps" heading.
+- Width/height morph over 220ms; content reveals inside the frame below its
+  48px header. The two-line 12px branded title stays within 144px to the left
+  of the logo. The main page title/subtitle fade while open, without resizing
+  the page. A subtle scrim dims the rest of the app; click-away consumes the
+  complete gesture before closing, never invoking a button underneath.
 - Cube marks use lower-right H/M/P identifiers, not notifications. Hub has the
   shared gray outer frame. There are no hamburger lines or first-run hero.
 - Creator Hub opens only the [public plan](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md)
@@ -126,8 +134,11 @@ section headings. The original bitmap is unchanged (SHA-256
   Standalone chrome remains; any future hosted suppression needs explicit host
   context. The native identity flag and capability list are unchanged.
 - Keyboard menu navigation includes arrows, Home/End, Enter/Space, Escape and
-  Tab; close/outside/focus dismissal and focus return are tested. Project
-  selection is a native button, not a mouse-only row.
+  Tab; logo/outside/focus dismissal and focus return are tested. Closed menu
+  content becomes inert and aria-hidden immediately, before the closing fade
+  finishes. Focus never scrolls the outer frame/page during animation; only
+  the menu scrolls for short viewports. Reduced motion disables transitions.
+  Project selection is a native button, not a mouse-only row.
 - A disabled ancestor fieldset prevents conflicting project/client/preference
   changes during an operation, including controls rendered while busy. Each
   control's own unavailable/consent state survives unlocking. Editing the
@@ -159,12 +170,21 @@ outside-click assertion targeted content under the open menu and was corrected.
 The narrow-label test caught real badge overflow; wrapping now passes. These
 browser checks do not prove native WebView2 integration or real installation.
 
-Final UI-pass verification on Windows, 2026-09-10: 203 Node tests and 27 Rust
+Initial UI-pass verification on Windows, 2026-09-10: 203 Node tests and 27 Rust
 tests passed. Browser smoke passed all listed viewports, keyboard project
 selection, public-link failures, picker cancellation, duplicate suppression,
 operation success/failure recovery and delayed/invalid readiness. Version sync
 and Rust formatting passed. Native metadata acceptance remains a separate
 test from the mocked browser UI, not proof of safe installation or updating.
+
+The subsequent morphing-drawer pass has 204 Node tests. Browser checks also
+capture natural intermediate animation frames, rapid transition reversal,
+stable page/frame geometry, immediate inert focus protection, a 560x240 short
+window and reduced-motion styles. Clicking over Set Up or Update Bridges while
+the drawer is open dismisses it without invoking either operation. Screenshots
+wait for final width and height, not just visibility. `motion-results.json`
+records intermediate measurements; `drawer-midmotion.png` pauses real CSS
+transitions for an inspectable intermediate frame.
 
 ## Before Release Or Hub Adoption
 

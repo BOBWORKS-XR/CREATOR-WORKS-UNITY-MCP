@@ -6,23 +6,47 @@ const publicPages = Object.freeze({
 
 const toggle = document.getElementById('appSwitcherToggle');
 const menu = document.getElementById('appSwitcherMenu');
-const switcher = toggle.closest('.app-switcher');
+const shell = document.getElementById('appSwitcherShell');
+const scrim = document.getElementById('appSwitcherScrim');
+const header = shell.closest('.header');
 const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
-document.getElementById('appSwitcherClose').addEventListener('click', () => closeMenu(true));
+
+function isOpen() { return toggle.getAttribute('aria-expanded') === 'true'; }
+
+function focusItem(index) {
+  const item = items[index];
+  item.focus({ preventScroll: true });
+  const top = item.getBoundingClientRect().top - menu.getBoundingClientRect().top + menu.scrollTop;
+  if (top < menu.scrollTop) menu.scrollTop = top;
+  else if (top + item.offsetHeight > menu.scrollTop + menu.clientHeight)
+    menu.scrollTop = top + item.offsetHeight - menu.clientHeight;
+}
 
 function closeMenu(restoreFocus = false) {
-  menu.hidden = true;
+  if (restoreFocus) toggle.focus({ preventScroll: true });
+  menu.inert = true;
+  menu.setAttribute('aria-hidden', 'true');
+  shell.classList.remove('expanded');
+  header.classList.remove('drawer-open');
   toggle.setAttribute('aria-expanded', 'false');
-  if (restoreFocus) toggle.focus();
+  toggle.setAttribute('aria-label', 'Creator apps');
+  toggle.title = 'Creator apps';
 }
 
 function openMenu(last = false) {
-  menu.hidden = false;
+  menu.inert = false;
+  menu.setAttribute('aria-hidden', 'false');
+  shell.classList.add('expanded');
+  header.classList.add('drawer-open');
   toggle.setAttribute('aria-expanded', 'true');
-  items[last ? items.length - 1 : 0].focus();
+  toggle.setAttribute('aria-label', 'Close Creator apps');
+  toggle.title = 'Close Creator apps';
+  focusItem(last ? items.length - 1 : 0);
 }
 
-toggle.addEventListener('click', () => menu.hidden ? openMenu() : closeMenu(true));
+toggle.addEventListener('click', () => isOpen() ? closeMenu(true) : openMenu());
+// Dismiss on click, not pointerdown: consume the whole gesture above the app.
+scrim.addEventListener('click', () => closeMenu(true));
 toggle.addEventListener('keydown', event => {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault();
@@ -39,7 +63,7 @@ menu.addEventListener('keydown', event => {
   if (event.key === 'End') next = items.length - 1;
   if (next !== undefined) {
     event.preventDefault();
-    items[next].focus();
+    focusItem(next);
   }
   if (event.key === 'Tab') closeMenu(true);
   if (event.key === ' ' && document.activeElement?.matches('a[role="menuitem"]')) {
@@ -70,14 +94,15 @@ menu.addEventListener('click', async event => {
 });
 
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !menu.hidden) {
+  if (event.key === 'Escape' && isOpen()) {
     event.preventDefault();
     closeMenu(true);
   }
 });
 document.addEventListener('pointerdown', event => {
-  if (!switcher.contains(event.target)) closeMenu(menu.contains(document.activeElement));
+  if (event.target === scrim) return;
+  if (!shell.contains(event.target)) closeMenu(menu.contains(document.activeElement));
 });
 document.addEventListener('focusin', event => {
-  if (!switcher.contains(event.target)) closeMenu();
+  if (!shell.contains(event.target)) closeMenu();
 });

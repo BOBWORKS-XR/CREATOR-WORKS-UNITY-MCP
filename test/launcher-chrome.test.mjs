@@ -18,6 +18,20 @@ test('standalone switcher exposes only public pages with truthful future states'
   assert.match(chrome, /publicPages\[item.dataset.appLink\]/);
 });
 
+test('drawer has one frame and closes accessibility immediately without transition timers', () => {
+  const css = fs.readFileSync('launcher/src/styles.css', 'utf8');
+  assert.match(html, /id="appSwitcherShell"/);
+  assert.match(html, /id="appSwitcherMenu" inert aria-hidden="true"/);
+  assert.doesNotMatch(html, /appSwitcherClose|app-menu-heading/);
+  assert.match(chrome, /menu.inert = true/);
+  assert.match(chrome, /menu.setAttribute\('aria-hidden', 'true'\)/);
+  assert.match(chrome, /preventScroll: true/);
+  assert.match(chrome, /scrim.addEventListener\('click'/);
+  assert.match(chrome, /if \(event.target === scrim\) return/);
+  assert.match(css, /\.app-shell.expanded \{ height: 294px; width: 224px; \}/);
+  assert.match(css, /prefers-reduced-motion: reduce/);
+});
+
 function fixture() {
   const fieldset = { disabled: false, attrs: {},
     setAttribute(name, value) { this.attrs[name] = value; },

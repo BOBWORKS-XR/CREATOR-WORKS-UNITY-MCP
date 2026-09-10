@@ -9,12 +9,14 @@
 <body>
   <div class="app">
     <header class="header">
+      <div class="app-scrim" id="appSwitcherScrim" aria-hidden="true"></div>
       <div class="app-switcher">
+        <div class="app-shell" id="appSwitcherShell">
+        <div class="app-drawer-title" aria-hidden="true"><span><span class="brand-creator">CREATOR</span> <span class="brand-works">WORKS</span></span><span>MCP</span></div>
         <button class="app-tab" id="appSwitcherToggle" type="button" aria-label="Creator apps" aria-haspopup="menu" aria-expanded="false" aria-controls="appSwitcherMenu" title="Creator apps">
           <span class="app-icon" aria-hidden="true"><img src="creator-works-logo.png" alt=""><span class="app-letter">M</span></span>
         </button>
-        <div class="app-menu" id="appSwitcherMenu" hidden>
-          <div class="app-menu-heading"><span>Creator apps</span><button id="appSwitcherClose" class="icon-button" type="button" aria-label="Close Creator apps" title="Close"><span class="icon icon-close" aria-hidden="true"></span></button></div>
+        <div class="app-menu" id="appSwitcherMenu" inert aria-hidden="true">
           <div role="menu" aria-label="Creator apps">
           <a class="app-menu-item" role="menuitem" tabindex="-1" data-app-link="hub" title="View the Creator Hub development plan" href="https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md">
             <span class="app-icon app-icon-hub" aria-hidden="true"><img src="creator-works-logo.png" alt=""><span class="app-letter">H</span></span>
@@ -33,6 +35,7 @@
             <span class="app-menu-copy"><strong>URP Converter</strong><small>Coming soon</small></span>
           </button>
           </div>
+        </div>
         </div>
       </div>
       <div class="logo">
