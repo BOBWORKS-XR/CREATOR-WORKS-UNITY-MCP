@@ -1,3 +1,22 @@
+; Tauri's default macro kills the GUI in silent/passive mode. Replace it for
+; both this installer and its generated uninstaller. This cannot change an
+; already-installed legacy uninstaller; installerProtocol remains 0.
+!ifmacrondef CheckIfAppIsRunning
+  !error "Expected Tauri running-app macro is missing; review installer template"
+!endif
+!macroundef CheckIfAppIsRunning
+!macro CheckIfAppIsRunning executableName productName
+  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "& { param([string]$$exe); try { $$name = [IO.Path]::GetFileNameWithoutExtension($$exe); $$running = @(Get-Process -ErrorAction Stop | Where-Object { $$_.ProcessName -eq $$name }); if ($$running.Count -gt 0) { exit 10 }; exit 0 } catch { exit 11 } }" "${executableName}"`
+  Pop $0
+  Pop $1
+  ${If} $0 != "0"
+    MessageBox MB_ICONSTOP|MB_OK \
+      "${productName} is running, or Setup could not verify that it is closed.$\r$\n$\r$\nFinish your work and close the app, then try again. Setup will not force-close it." /SD IDOK
+    SetErrorLevel 10
+    Abort
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
 creator_works_mcp_runtime_check:
   ClearErrors
@@ -9,7 +28,7 @@ creator_works_mcp_runtime_check:
   StrCmp $0 "10" creator_works_mcp_runtime_locked
 
   MessageBox MB_ICONSTOP|MB_OK \
-    "Setup could not check whether Creator Works MCP is still running.$\r$\n$\r$\nClose Codex, Claude Code, and Creator Works MCP, then run Setup again."
+    "Setup could not check whether Creator Works MCP is still running.$\r$\n$\r$\nClose Codex, Claude Code, and Creator Works MCP, then run Setup again." /SD IDOK
   SetErrorLevel 11
   Abort
 

@@ -97,7 +97,7 @@ label[for] {
   width: 55px;
   z-index: 40;
 }
-.app-shell.expanded { height: 294px; width: 224px; }
+.app-shell.expanded { height: 352px; width: 224px; }
 .app-shell:has(.app-tab:hover) { border-color: #687780; }
 .app-drawer-title {
   color: var(--text-2);
@@ -181,10 +181,11 @@ label[for] {
 }
 .app-icon-hub img { height: 22px; position: relative; width: 22px; z-index: 1; }
 .app-icon-hub .app-letter { z-index: 2; }
-.app-icon-pending { color: var(--text-2); font-size: 15px; font-weight: 600; }
+.app-icon-converter { background: #000; border-radius: 5px; }
+.app-icon-converter img { height: 22px; width: 22px; }
 .app-menu {
   left: 0;
-  height: 244px;
+  height: 302px;
   max-height: calc(100dvh - 74px);
   opacity: 0;
   overflow-x: hidden;

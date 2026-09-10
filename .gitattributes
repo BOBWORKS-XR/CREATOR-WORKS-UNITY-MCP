@@ -1,0 +1,2 @@
+# Preserve the official brand asset byte-for-byte across platform checkouts.
+launcher/src/sidequest-mark-white.svg -text

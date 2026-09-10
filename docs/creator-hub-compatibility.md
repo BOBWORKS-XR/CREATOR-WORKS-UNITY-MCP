@@ -48,21 +48,26 @@ guess; failed probes must never fall back to ordinary launch.
 
 ## Lifecycle Boundary
 
-Only `launch.standalone` is advertised. Repeated Open/focus, simultaneous cold
-starts, blocked GUI behavior, different privileges/sessions and close-during-
-operation semantics are not established by identity support.
+Only `launch.standalone` is advertised by the unchanged identity response.
+The follow-up adds a separately scoped Windows native close guard; see
+[Windows lifecycle and package evidence](creator-hub-windows-lifecycle.md).
+Repeated Open/focus, simultaneous cold starts, blocked GUI forwarding and
+different privileges/sessions remain outside that close-only contract.
 
 The official Tauri single-instance plugin was evaluated, but no plugin or
 custom IPC implementation is included. Its reviewed Windows mutex/message-window
 initialization and synchronous forwarding require focused native lifecycle
 testing. A short-lived startup guard alone does not prove blocked-GUI behavior.
-Single-instance work was therefore deferred by agreement with the Setup task.
+Single-instance work remains a separate acceptance gate, not implied by the
+new native close guard or by a successful metadata probe.
 
 Closing the MCP launcher does not prove that its private Node server runtime
 has stopped: AI clients can still own those processes. Preserve the existing
 installer checks and manual consent. Hub must not replace a running app/server,
 force-close clients/Unity, rewrite routes/configuration, or treat metadata
-success as an idle/update-safe receipt. No idle or updater contract is added.
+success as an idle/update-safe receipt. Native launcher busy hints are not
+server/project quiescence or a race-free installation lease. Legacy installers
+remain interactive-only (`installerProtocol: 0`).
 
 ## Validation
 
@@ -116,7 +121,7 @@ section headings. The original bitmap is unchanged (SHA-256
 `f3f68baa0d887de92e6cf7aba8beae7ff8ea5c44b13444f018413041ade19ea7`).
 
 - One fixed left-attached drawer frame at x=-1/y=12: 55x48 collapsed,
-  224x294 expanded, limited to viewport height minus 24px. The 54x46 logo
+  224x352 expanded for five entries, limited to viewport height minus 24px. The 54x46 logo
   button slides to the right as the frame expands and toggles it closed.
   There is no separate floating menu, close X or "Creator apps" heading.
 - Width/height morph over 220ms; content reveals inside the frame below its
@@ -130,11 +135,15 @@ section headings. The original bitmap is unchanged (SHA-256
   geometry, not the Unity logo. There are no hamburger lines or first-run hero.
 - Creator Hub opens only the [public plan](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md)
   and is labeled in development. Setup opens its [public releases](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases).
-  MCP is current; URP Converter is non-actionable and labeled coming soon.
+  MCP is current. Creator Converter uses the official white SideQuest mark on
+  a black tile with a C identifier and "SideQuest / Coming soon" label.
+  Creator Plugins uses a PL identifier and "Coming soon". Both are disabled:
+  no converter feed, community backend, store, account or installation exists.
 - No executable discovery/launch, hosted-mode inference, URL-parameter mode,
   installation prompt, automatic installation or new configuration key exists.
   Standalone chrome remains; any future hosted suppression needs explicit host
-  context. The native identity flag and capability list are unchanged.
+  context. The native identity flag and capability list are unchanged. New
+  native operation leases additionally protect closing during UI workflows.
 - Keyboard menu navigation includes arrows, Home/End, Enter/Space, Escape and
   Tab; logo/outside/focus dismissal and focus return are tested. Closed menu
   content becomes inert and aria-hidden immediately, before the closing fade
@@ -210,5 +219,20 @@ still pass; MCP and Project Setup marks are unchanged.
    safety before Hub adopts those operations. A successful metadata probe
    does not fulfill these separate acceptance gates.
 
-No Hub UI, URP Converter, automatic updater, installation swap, Unity project
-mutation, client-config migration change or extra first-run prompt is included.
+No Hub shell, functional Creator Converter, community directory backend,
+automatic updater, installation swap, Unity project mutation, client-config
+migration change or extra first-run prompt is included.
+
+## Latest Follow-Up
+
+The close-guard/placeholder follow-up has 210 Node tests and 32 Rust tests.
+Browser screenshots include all five navigation items and retain the same
+short-window, keyboard, reduced-motion and conflicting-action checks. The
+official SideQuest SVG is unchanged and attributed in THIRD_PARTY_NOTICES.md.
+The native Tauri fixture verifies busy window-close and exit refusal and idle
+window-close exit using the same hooks as production, without loading app
+configuration or project handlers. This is not a real installer/update test.
+
+The roadmap now also reserves Creator Plugins for an optional community
+directory. Its current navigation item is non-installable; distribution,
+review, trust and consent need design before any plugin execution is added.

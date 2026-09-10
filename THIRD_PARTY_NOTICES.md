@@ -19,6 +19,14 @@ The complete notice is included at `launcher/src/icons/LICENSE-lucide` alongside
 the assets. No icon runtime dependency is added. The cube bitmap remains the
 existing Creator Works logo.
 
+The unmodified white SideQuest mark at `launcher/src/sidequest-mark-white.svg`
+identifies SideQuest's future Creator Converter. Source: the official
+[SideQuest branding page](https://sidequestvr.com/branding),
+[Mark - White.svg](https://sidequestvr.com/assets/images/branding/Mark%20-%20White.svg).
+The SideQuest brand asset remains owned by SideQuest and is not relicensed
+under this repository's MIT license. SHA-256:
+`bd5e1350ad3e1f6a3b767945f43631aa85b3ebb3f4278b1634d86c6e88cf14d6`.
+
 ## Unity MCP Research
 
 The following MIT-licensed projects were reviewed for public documentation, installation verification, focused-tool design, testing, and client-configuration ideas:

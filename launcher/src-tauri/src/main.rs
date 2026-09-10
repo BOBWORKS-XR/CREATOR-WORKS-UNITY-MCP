@@ -4,6 +4,7 @@
 mod feedback;
 mod hub;
 mod jsonc;
+mod lifecycle;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -2043,6 +2044,16 @@ fn one_click_setup(
     })
 }
 
+#[tauri::command]
+fn begin_ui_operation() -> Result<u32, &'static str> {
+    lifecycle::LIFECYCLE.begin_workflow()
+}
+
+#[tauri::command]
+fn finish_ui_operation(id: u32) -> Result<(), &'static str> {
+    lifecycle::LIFECYCLE.finish_workflow(id)
+}
+
 fn main() {
     if let Some(code) = hub::handle_entry(&env::args_os().skip(1).collect::<Vec<_>>()) {
         std::process::exit(code);
@@ -2068,39 +2079,63 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![
-            load_config,
-            save_config,
-            add_channel,
-            add_project,
-            validate_unity_scene,
-            discover_unity_projects,
-            get_claude_mcp_config,
-            update_claude_mcp_config,
-            remove_claude_mcp_config,
-            update_codex_mcp_config,
-            remove_codex_mcp_config,
-            get_antigravity_mcp_config,
-            update_antigravity_mcp_config,
-            remove_antigravity_mcp_config,
-            get_opencode_mcp_config,
-            update_opencode_mcp_config,
-            remove_opencode_mcp_config,
-            check_unity_extension,
-            get_unity_extension_status,
-            get_project_sdk_profile,
-            install_unity_extension,
-            update_configured_unity_extensions,
-            get_mcp_root,
-            set_unity_custom_scripts,
-            set_unity_allow_all_tests,
-            get_onboarding_status,
-            get_project_feedback_settings,
-            set_project_feedback_settings,
-            one_click_setup,
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .setup(|app| {
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                lifecycle::LIFECYCLE.attach_window(window.hwnd()?.0 as usize);
+            }
+            #[cfg(not(windows))]
+            let _ = app;
+            Ok(())
+        })
+        .on_window_event(lifecycle::window_event)
+        .invoke_handler(|invoke| {
+            let Ok(_command) = lifecycle::LIFECYCLE.command() else {
+                invoke
+                    .resolver
+                    .reject("Launcher is closing or lifecycle state is unavailable");
+                return true;
+            };
+            // All registered handlers are synchronous. Keep the guard alive
+            // through response generation, including failed command arguments.
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+                begin_ui_operation,
+                finish_ui_operation,
+                load_config,
+                save_config,
+                add_channel,
+                add_project,
+                validate_unity_scene,
+                discover_unity_projects,
+                get_claude_mcp_config,
+                update_claude_mcp_config,
+                remove_claude_mcp_config,
+                update_codex_mcp_config,
+                remove_codex_mcp_config,
+                get_antigravity_mcp_config,
+                update_antigravity_mcp_config,
+                remove_antigravity_mcp_config,
+                get_opencode_mcp_config,
+                update_opencode_mcp_config,
+                remove_opencode_mcp_config,
+                check_unity_extension,
+                get_unity_extension_status,
+                get_project_sdk_profile,
+                install_unity_extension,
+                update_configured_unity_extensions,
+                get_mcp_root,
+                set_unity_custom_scripts,
+                set_unity_allow_all_tests,
+                get_onboarding_status,
+                get_project_feedback_settings,
+                set_project_feedback_settings,
+                one_click_setup,
+            ];
+            handler(invoke)
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(lifecycle::run_event);
 }
 
 fn update_unity_launcher_settings<F>(unity_project_path: &str, update: F) -> Result<(), String>

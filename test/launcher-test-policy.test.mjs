@@ -13,7 +13,11 @@ function fixture(invoke) {
   }]));
   const messages = [];
   const context = vm.createContext({
-    document: { addEventListener() {} }, window: { __TAURI__: { core: { invoke } } }, controls, messages,
+    document: { addEventListener() {} }, window: { __TAURI__: { core: { invoke: async (name, args) => {
+      if (name === 'begin_ui_operation') return 1;
+      if (name === 'finish_ui_operation') return;
+      return invoke(name, args);
+    } } } }, controls, messages,
   });
   vm.runInContext(source, context);
   vm.runInContext(`

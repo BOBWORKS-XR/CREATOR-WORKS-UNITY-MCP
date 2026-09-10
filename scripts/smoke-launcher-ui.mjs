@@ -17,6 +17,7 @@ const files = new Map([
   ['/styles.css', ['styles.css', 'text/css']], ['/app.js', ['app.js', 'text/javascript']],
   ['/app-chrome.js', ['app-chrome.js', 'text/javascript']],
   ['/updates.js', ['updates.js', 'text/javascript']], ['/creator-works-logo.png', ['creator-works-logo.png', 'image/png']],
+  ['/sidequest-mark-white.svg', ['sidequest-mark-white.svg', 'image/svg+xml']],
   ['/icons/external-link.svg', ['icons/external-link.svg', 'image/svg+xml']]
 ]);
 const server = http.createServer(async (request, response) => {
@@ -55,6 +56,8 @@ try {
         state.calls.push({ name, args });
         if (state.errors[name]) throw new Error(state.errors[name]);
         switch (name) {
+          case 'begin_ui_operation': return 1;
+          case 'finish_ui_operation': return;
           case 'load_config': return structuredClone(state.config);
           case 'save_config': state.config = structuredClone(args.config); return;
           case 'discover_unity_projects': return state.config.channels.map(c => ({name:c.name,path:c.unity_project_path,unityVersion:'6000.3.21f1'}));
@@ -120,7 +123,7 @@ try {
   await page.goto(base);
   await ready();
   assert.equal(await page.locator('#setupBtn').isEnabled(), true);
-  assert.deepEqual(await page.evaluate(() => fixture.calls.filter(c => !/^(load_config|discover_unity_projects|get_)/.test(c.name))), []);
+  assert.deepEqual(await page.evaluate(() => fixture.calls.filter(c => !/^(begin_ui_operation|finish_ui_operation|load_config|discover_unity_projects|get_)/.test(c.name))), []);
   await layout('desktop-900',900,700);
   await layout('compact-desktop-560',560,600);
   await page.setViewportSize({width:900,height:700});
@@ -142,7 +145,7 @@ try {
   async function expanded() {
     await page.waitForFunction(() => {
       const shell = document.getElementById('appSwitcherShell').getBoundingClientRect();
-      return shell.width === 224 && shell.height === Math.min(294, innerHeight - 24) &&
+      return shell.width === 224 && shell.height === Math.min(352, innerHeight - 24) &&
         getComputedStyle(document.getElementById('appSwitcherMenu')).opacity === '1';
     });
     assert.equal(await menu.evaluate(el => el.inert),false);
@@ -152,7 +155,7 @@ try {
   await page.keyboard.press('Enter');
   assert.equal(await items.nth(0).evaluate(el => el === document.activeElement), true);
   await page.keyboard.press('ArrowUp');
-  assert.equal(await items.nth(3).evaluate(el => el === document.activeElement), true);
+  assert.equal(await items.nth(4).evaluate(el => el === document.activeElement), true);
   await page.keyboard.press('Enter');
   assert.deepEqual(await page.evaluate(() => fixture.links), []);
   assert.equal(await menu.isVisible(), true);
@@ -163,6 +166,10 @@ try {
   assert.equal(await toggle.evaluate(el => el === document.activeElement), true);
   await toggle.press('ArrowDown');
   await page.keyboard.press('End');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  assert.deepEqual(await page.evaluate(() => fixture.links), []);
+  assert.equal(await menu.isVisible(), true);
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   assert.deepEqual(await page.evaluate(() => fixture.links), ['https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases']);
@@ -217,6 +224,13 @@ try {
   assert.deepEqual(hubMark.image,{width:22,source:'creator-works-logo.png'});
   assert.equal(hubMark.badgeLayer,'2');
   checks.push('Hub gray cube backplate, original 22px bitmap and outside H badge');
+  const converterMark = await page.locator('.app-icon-converter').evaluate(el => ({
+    background:getComputedStyle(el).backgroundColor, radius:getComputedStyle(el).borderRadius,
+    width:el.clientWidth, imageWidth:el.querySelector('img').width,
+    loaded:el.querySelector('img').naturalWidth > 0, badge:el.querySelector('.app-letter').textContent
+  }));
+  assert.deepEqual(converterMark,{background:'rgb(0, 0, 0)',radius:'5px',width:34,imageWidth:22,loaded:true,badge:'C'});
+  checks.push('official SideQuest Converter mark and non-actionable Converter/Plugins entries');
   await page.screenshot({path:path.join(output,'desktop-menu.png')});
   await page.keyboard.press('Escape');
   await closed();
@@ -327,7 +341,7 @@ try {
     } while (performance.now() - start < 300);
     return samples;
   });
-  assert.ok(motion.some(s => s.w > 55 && s.w < 224 && s.h > 48 && s.h < 294), 'intermediate animation frames');
+  assert.ok(motion.some(s => s.w > 55 && s.w < 224 && s.h > 48 && s.h < 352), 'intermediate animation frames');
   assert.ok(motion.every(s => s.bodyStable && s.shellScroll === 0), 'drawer must not resize/scroll the body or frame');
   assert.equal(motion.at(-1).w,224);
   assert.equal(motion.at(-1).tabX,168);
@@ -366,8 +380,9 @@ try {
   await expanded();
   const short = await menu.evaluate(el => {
     const shell = document.getElementById('appSwitcherShell').getBoundingClientRect();
-    const last = el.querySelector('[aria-disabled="true"]').getBoundingClientRect();
-    return {shellBottom:shell.bottom,scroll:el.scrollTop,lastBottom:last.bottom,active:document.activeElement === el.querySelector('[aria-disabled="true"]')};
+    const lastItem = el.querySelector('[role="menuitem"]:last-child');
+    const last = lastItem.getBoundingClientRect();
+    return {shellBottom:shell.bottom,scroll:el.scrollTop,lastBottom:last.bottom,active:document.activeElement === lastItem};
   });
   assert.ok(short.shellBottom <= 228 && short.lastBottom <= short.shellBottom && short.scroll > 0 && short.active);
   await page.screenshot({path:path.join(output,'drawer-short-window.png')});

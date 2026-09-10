@@ -39,8 +39,11 @@ document.addEventListener('DOMContentLoaded', async function() {
   }
 
   setupEventListeners();
+  window.__TAURI__.event?.listen('creator-lifecycle-close-blocked', () => {
+    showToast('Finish the current operation before closing Creator Works MCP.', 'error');
+  }).catch(error => console.error('Close notification unavailable:', error));
 
-  try {
+  await runUIOperation(async () => {
     const results = await Promise.all([
       window.__TAURI__.core.invoke('load_config'),
       window.__TAURI__.core.invoke('discover_unity_projects')
@@ -54,13 +57,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     await refreshOnboardingStatus();
     updateUI();
     scheduleUpdateChecks();
-  } catch (error) {
-    console.error('Launcher initialization failed:', error);
-    showToast('Failed to initialize launcher: ' + String(error), 'error');
-  } finally {
-    elements.workspaceControls.disabled = false;
-    updateSetupButton();
-  }
+  });
 });
 
 // An ancestor fieldset locks even freshly rendered controls without overwriting
@@ -70,11 +67,20 @@ async function runUIOperation(action) {
   operationActive = true;
   elements.workspaceControls.disabled = true;
   elements.workspaceControls.setAttribute('aria-busy', 'true');
+  let lease;
   try {
+    lease = await window.__TAURI__.core.invoke('begin_ui_operation');
     await action();
   } catch (error) {
     showToast('Action failed: ' + String(error), 'error');
   } finally {
+    if (lease !== undefined) {
+      try { await window.__TAURI__.core.invoke('finish_ui_operation', { id: lease }); }
+      catch (error) {
+        showToast('Operation lock could not be released: ' + String(error), 'error');
+        return;
+      }
+    }
     operationActive = false;
     elements.workspaceControls.disabled = false;
     elements.workspaceControls.removeAttribute('aria-busy');

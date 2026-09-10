@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import vm from 'node:vm';
 import test from 'node:test';
 
@@ -28,7 +29,7 @@ test('drawer has one frame and closes accessibility immediately without transiti
   assert.match(chrome, /preventScroll: true/);
   assert.match(chrome, /scrim.addEventListener\('click'/);
   assert.match(chrome, /if \(event.target === scrim\) return/);
-  assert.match(css, /\.app-shell.expanded \{ height: 294px; width: 224px; \}/);
+  assert.match(css, /\.app-shell.expanded \{ height: 352px; width: 224px; \}/);
   assert.match(css, /prefers-reduced-motion: reduce/);
 });
 
@@ -41,12 +42,28 @@ test('Hub badge uses a three-face cube backplate without replacing the original 
   assert.match(html, /app-icon app-icon-hub[^>]*><img src="creator-works-logo.png"/);
 });
 
+test('future Converter and Plugins entries remain disabled and non-installable', () => {
+  assert.equal(createHash('sha256').update(fs.readFileSync('launcher/src/sidequest-mark-white.svg')).digest('hex'),
+    'bd5e1350ad3e1f6a3b767945f43631aa85b3ebb3f4278b1634d86c6e88cf14d6');
+  assert.match(html, /aria-disabled="true">\s*<span class="app-icon app-icon-converter"/);
+  assert.match(html, /sidequest-mark-white.svg/);
+  assert.match(html, /Creator Converter<\/strong><small>SideQuest \/ Coming soon/);
+  assert.match(html, /Creator Plugins<\/strong><small>Coming soon/);
+  assert.doesNotMatch(html, /URP Converter/);
+  assert.match(chrome, /if \(item.getAttribute\('aria-disabled'\) === 'true'\) return/);
+});
+
 function fixture() {
   const fieldset = { disabled: false, attrs: {},
     setAttribute(name, value) { this.attrs[name] = value; },
     removeAttribute(name) { delete this.attrs[name]; } };
   const messages = [];
-  const context = vm.createContext({ document: { addEventListener() {} }, fieldset, messages });
+  const calls = [];
+  const context = vm.createContext({ document: { addEventListener() {} }, fieldset, messages,
+    window: { __TAURI__: { core: { invoke: async (name, args) => {
+      calls.push({name, args});
+      if (name === 'begin_ui_operation') return 1;
+    } } } } });
   vm.runInContext(source, context);
   vm.runInContext(`
     elements.workspaceControls = fieldset;
@@ -55,7 +72,7 @@ function fixture() {
     onboarding = {project:{valid:true}, runtime:{ready:true}};
     showToast = message => messages.push(message);
   `, context);
-  return { context, fieldset, messages };
+  return { context, fieldset, messages, calls };
 }
 
 test('one operation locks the workspace, rejects overlapping actions and unlocks on completion', async () => {
@@ -76,6 +93,27 @@ test('one operation locks the workspace, rejects overlapping actions and unlocks
   assert.equal(f.fieldset.disabled, false);
   assert.equal(f.fieldset.attrs['aria-busy'], undefined);
   assert.equal(vm.runInContext('elements.setupBtn.disabled', f.context), false);
+  assert.deepEqual(f.calls.map(c => c.name), ['begin_ui_operation','finish_ui_operation']);
+  assert.equal(f.calls[1].args.id, 1);
+});
+
+test('native lease refusal prevents the action; release failure preserves the operation lock', async () => {
+  const f = fixture();
+  let ran = false;
+  f.context.action = async () => { ran = true; };
+  f.context.window.__TAURI__.core.invoke = async () => { throw new Error('closing'); };
+  await vm.runInContext('runUIOperation(action)', f.context);
+  assert.equal(ran, false);
+  assert.equal(f.fieldset.disabled, false);
+  f.context.window.__TAURI__.core.invoke = async name => {
+    if (name === 'begin_ui_operation') return 42;
+    throw new Error('release failed');
+  };
+  await vm.runInContext('runUIOperation(action)', f.context);
+  assert.equal(ran, true);
+  assert.equal(f.fieldset.disabled, true);
+  assert.equal(vm.runInContext('operationActive', f.context), true);
+  assert.match(f.messages.at(-1), /lock could not be released/);
 });
 
 test('a rejected operation surfaces the failure and preserves individual disabled states', async () => {
