@@ -281,24 +281,20 @@ Looking for the former **BANTWORKS MCP** name or old launcher layout? [Open the 
 
 ## Development
 
-This development branch adds the [Creator Hub identity foundation](docs/creator-hub-compatibility.md)
-for `2.7.0-alpha.1`: a read-only launcher metadata flag, not a Hub application,
-single-instance guarantee or automatic updater. The launcher also has compact
-shared Creator styling and an accessible app switcher with public plan/release
-links only. Project and configuration controls lock during operations; SDK and
-bridge status stay visible on narrow windows. Stable downloads above remain
-2.6.0; no current installed app needs to change for this source-only work.
+The Windows `2.7.0-alpha.1` prerelease includes the
+[Creator Hub identity contract](docs/creator-hub-compatibility.md), compact shared
+interface, and [hosted MCP preview](docs/creator-hub-hosted-preview.md). A verified
+compatible Hub can open the normal writable controls after native consent,
+using the installed MCP's existing settings and resources. The optional read-only
+mode remains available for development; it is not the only hosting mode.
+Project and configuration controls lock during operations, and standalone MCP
+remains available without Hub. Stable downloads remain on `2.6.0`.
 
-The approved [Creator Hub direction](docs/creator-hub-compatibility.md#required-product-direction)
-is one host window displaying the real installed apps with shared chrome,
-existing files/settings and standalone fallback. This branch now includes a
-[read-only MCP hosting preview](docs/creator-hub-hosted-preview.md) using the
-Setup-first protocol: the same UI with a native settings snapshot and folder
-picker, without configuration writes or bridge updates. This is **not full Hub
-readiness**: real Hub/MCP acceptance, live state transfer, shortcut routing and
-safe adoption remain required. Metadata still advertises standalone only. Adoption
-and any required compatibility update need explicit consent; declining leaves
-the app unchanged and standalone. Hub-only installation remains available.
+The [coordinated release notes](docs/releases/2.7.0-alpha.1.md) distinguish accepted
+Windows installer checks from final through-Hub testing. Metadata identity alone
+does not grant hosting or mutation authority. Automatic shortcut adoption,
+transfer of an already-open app, and all historical installation migrations
+remain unfinished. Installing Hub alone does not adopt apps or change shortcuts.
 
 ```powershell
 git clone https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP.git
