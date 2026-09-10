@@ -56,7 +56,7 @@ installer, Unity AI integration, or a player emulator.
 
 ## Quick Start
 
-1. For Windows testing, use the coordinated preview from [Releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases), or install/update it inside Creator Hub with **Include prereleases** enabled. Linux/macOS packages remain on the separate stable release track.
+1. For Windows testing, [install Creator Hub](https://github.com/BOBWORKS-XR/CREATOR-HUB/releases/tag/v0.1.0-alpha.3), leave **Include prereleases** enabled, then choose **Install app** or **Update app** on its MCP page. Existing MCP users do not need a separate MCP download or Project Setup. The [direct installer](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.7.0-alpha.1) remains available for standalone use. Linux/macOS packages remain on the separate stable release track.
 2. Open **Creator Works MCP** and choose a Unity project.
 3. Select the MCP clients you want to configure.
 4. Press **Set Up Creator Works MCP**.
