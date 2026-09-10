@@ -5,6 +5,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
     throw 'Real installation acceptance is restricted to a disposable GitHub-hosted Windows runner.'
 }
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $repo 'test\fixtures\owned-node.ps1')
 $candidate = (Resolve-Path -LiteralPath $Installer).Path
 $candidateRoot = [IO.Path]::GetFullPath((Join-Path $repo 'launcher\src-tauri\target\release\bundle\nsis')) + '\'
 if (-not $candidate.StartsWith($candidateRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Candidate must be built in this checkout.' }
@@ -38,36 +39,6 @@ function Run-Setup([string]$path, [string]$arguments, [int]$expected, [string]$l
         Require ($child.WaitForExit(180000)) "$label exceeded the deadline. No process was force-closed."
         Require ($child.ExitCode -eq $expected) "$label returned $($child.ExitCode), expected $expected."
         $checks.Add([pscustomobject]@{ test = $label; exitCode = $child.ExitCode; passed = $true })
-    } finally { $child.Dispose() }
-}
-function Start-OwnedNode([string]$path) {
-    $psi = [Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $path
-    $psi.Arguments = '-e "process.stdin.resume();process.stdin.on(''data'',()=>process.exit(0));process.stdin.on(''end'',()=>process.exit(0));console.log(''fixture-ready'')"'
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardInput = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $child = [Diagnostics.Process]::Start($psi)
-    try {
-        $ready = $child.StandardOutput.ReadLineAsync()
-        Require ($ready.Wait(10000)) 'Owned Node fixture did not become ready.'
-        if ($ready.Result -ne 'fixture-ready' -or $child.HasExited) {
-            $detail = if ($child.HasExited) { "exit=$($child.ExitCode); stderr=$($child.StandardError.ReadToEnd())" } else { 'process still running' }
-            throw "Owned Node fixture failed: executable=$path; stdout=$($ready.Result); $detail"
-        }
-        return $child
-    } catch {
-        Close-OwnedNode $child
-        throw
-    }
-}
-function Close-OwnedNode($child) {
-    if ($null -eq $child) { return }
-    try {
-        if (-not $child.HasExited) { $child.StandardInput.WriteLine('done'); $child.StandardInput.Close() }
-        Require ($child.WaitForExit(10000)) 'Owned Node did not exit cooperatively; no force-close was attempted.'
     } finally { $child.Dispose() }
 }
 function Snapshot {
@@ -120,12 +91,14 @@ try {
     $owned = Start-OwnedNode (Join-Path $installRoot 'server\runtime\node.exe')
     Run-Setup $candidate '/S /NS' 10 'Upgrade refuses active installed private runtime'
     Require ((Snapshot) -ceq $before) 'Blocked upgrade altered baseline files/settings/registration.'
-    Require (-not $owned.HasExited -and -not $unrelated.HasExited) 'Installer stopped a fixture process.'
+    Run-Setup $candidate ('/S /NS /UPDATE /D=' + $installRoot) 10 'Hub update mode refuses active installed private runtime'
+    Require ((Snapshot) -ceq $before) 'Blocked Hub upgrade altered baseline files/settings/registration.'
+    Require (-not $owned.Process.HasExited -and -not $unrelated.Process.HasExited) 'Installer stopped a fixture process.'
     Close-OwnedNode $owned
     $owned = $null
-    Run-Setup $candidate '/S /NS' 0 'Installed upgrade succeeds after cooperative runtime exit'
+    Run-Setup $candidate ('/S /NS /UPDATE /D=' + $installRoot) 0 'Hub installed upgrade succeeds after cooperative runtime exit'
     Verify-Candidate
-    Require (-not $unrelated.HasExited) 'Upgrade stopped an unrelated Node.'
+    Require (-not $unrelated.Process.HasExited) 'Upgrade stopped an unrelated Node.'
     $checks.Add([pscustomobject]@{ test = 'Installed hashes, settings and unmanaged content preserved'; passed = $true })
 
     $before = Snapshot
@@ -133,7 +106,7 @@ try {
     $uninstaller = Join-Path $installRoot 'uninstall.exe'
     Run-Setup $uninstaller ('/S _?=' + $installRoot) 10 'Candidate uninstaller refuses active runtime'
     Require ((Snapshot) -ceq $before) 'Blocked uninstall altered installed baseline.'
-    Require (-not $owned.HasExited -and -not $unrelated.HasExited) 'Uninstaller stopped a fixture process.'
+    Require (-not $owned.Process.HasExited -and -not $unrelated.Process.HasExited) 'Uninstaller stopped a fixture process.'
     Close-OwnedNode $owned
     $owned = $null
 

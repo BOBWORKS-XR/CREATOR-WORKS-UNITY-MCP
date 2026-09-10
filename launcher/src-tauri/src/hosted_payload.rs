@@ -74,6 +74,8 @@ mod tests {
     fn missing_mismatched_and_changed_payloads_are_not_accepted() {
         let root = std::env::temp_dir().join(format!("creator-payload-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
+        // macOS temp_dir can contain the system /var -> /private/var link.
+        let root = root.canonicalize().unwrap();
         let path = root.join("server.mjs");
         let hash = format!("{:x}", Sha256::digest(b"fixture"));
         let expected = [("server.mjs", hash.as_str())];
