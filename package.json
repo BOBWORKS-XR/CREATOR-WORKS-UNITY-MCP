@@ -1,6 +1,6 @@
 {
   "name": "creator-works-mcp",
-  "version": "2.6.0",
+  "version": "2.7.0-alpha.1",
   "description": "Codex, Claude Code, Antigravity, OpenCode, and MCP-compatible Unity integration with first-class Creator SDK and Banter knowledge",
   "type": "module",
   "main": "dist/index.js",

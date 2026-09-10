@@ -271,6 +271,11 @@ Looking for the former **BANTWORKS MCP** name or old launcher layout? [Open the 
 
 ## Development
 
+This development branch adds the [Creator Hub identity foundation](docs/creator-hub-compatibility.md)
+for `2.7.0-alpha.1`: a read-only launcher metadata flag, not a Hub application,
+single-instance guarantee or automatic updater. Stable downloads above remain
+2.6.0; no current installed app needs to change for this source-only work.
+
 ```powershell
 git clone https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP.git
 Set-Location CREATOR-WORKS-UNITY-MCP

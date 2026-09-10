@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod feedback;
+mod hub;
 mod jsonc;
 
 use serde::{Deserialize, Serialize};
@@ -2043,6 +2044,10 @@ fn one_click_setup(
 }
 
 fn main() {
+    if let Some(code) = hub::handle_entry(&env::args_os().skip(1).collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
+
     // Linux-only: work around WebKitGTK failures on Wayland sessions and
     // certain GPU drivers where the DMA-BUF renderer can't allocate a
     // backing buffer for the WebView ("Failed to create GBM buffer of size
