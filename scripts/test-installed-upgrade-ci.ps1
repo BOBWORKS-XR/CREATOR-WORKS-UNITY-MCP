@@ -53,7 +53,10 @@ function Start-OwnedNode([string]$path) {
     try {
         $ready = $child.StandardOutput.ReadLineAsync()
         Require ($ready.Wait(10000)) 'Owned Node fixture did not become ready.'
-        Require ($ready.Result -eq 'fixture-ready' -and -not $child.HasExited) 'Owned Node fixture failed.'
+        if ($ready.Result -ne 'fixture-ready' -or $child.HasExited) {
+            $detail = if ($child.HasExited) { "exit=$($child.ExitCode); stderr=$($child.StandardError.ReadToEnd())" } else { 'process still running' }
+            throw "Owned Node fixture failed: executable=$path; stdout=$($ready.Result); $detail"
+        }
         return $child
     } catch {
         Close-OwnedNode $child
@@ -95,6 +98,7 @@ function Verify-Candidate {
 }
 
 try {
+    Copy-Item -LiteralPath $candidate -Destination (Join-Path $output ([IO.Path]::GetFileName($candidate)))
     $extracted = Join-Path $output 'extracted'
     $sevenZip = (Get-Command 7z.exe -ErrorAction Stop).Source
     & $sevenZip x $candidate ('-o' + $extracted) '-y' | Out-Null
