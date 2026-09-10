@@ -50,4 +50,15 @@ Unity's public Shader Graph documentation and locally installed package source w
 
 ## Deliberate Non-Adoptions
 
+The experimental Unity CLI adapter was independently authored against Unity's
+[CLI documentation](https://docs.unity.com/en-us/unity-cli/use-unity-cli) and
+[Pipeline command documentation](https://docs.unity3d.com/Packages/com.unity.pipeline@0.6/manual/index.html),
+reviewed on 2026-09-10. It invokes a separately supplied official CLI executable;
+neither the CLI binary nor Pipeline package is included in this repository or
+our installer. The test harness resolves Pipeline only inside a newly created
+disposable test project. Unity's CLI skills were consulted as documentation,
+not copied: their [Unity Companion License](https://github.com/Unity-Technologies/skills/blob/main/LICENSE.md)
+must not be represented as MIT. This project's MIT license does not relicense
+Unity software. Any future redistribution requires a separate terms review.
+
 Remote WebSocket/HTTP listeners and arbitrary C# execution appear in parts of the broader Unity MCP ecosystem. They are not adopted here because Creator Works MCP is intentionally local and project-scoped, and those capabilities need a separate authentication and authorization design.
