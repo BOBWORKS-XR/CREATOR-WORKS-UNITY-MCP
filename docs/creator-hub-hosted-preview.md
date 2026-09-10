@@ -3,8 +3,9 @@
 Unreleased Windows x64 development slice on `feature/creator-hub-compatibility`,
 version `2.7.0-alpha.1`. Not an installer or a production Hub capability.
 The Hub/Setup owner owns host verification, iframe isolation, app routing and
-adoption. MCP implements only its own adapter against the suite's preview v1
-contract. The independent Node MCP server protocol is unchanged.
+adoption. MCP implements its own read-only adapter, preserving the suite's
+preview v1 contract, with an optional revision-2 lifecycle preparation below.
+The independent Node MCP server protocol is unchanged.
 
 ## What Is Implemented
 
@@ -48,7 +49,8 @@ to 64 KiB and responses to 2 MiB, including the newline.
 
 Replies contain `session`, `id`, `ok` and `result` or `error`. Successful initialize
 returns exactly `appId: creator-works-mcp`, `version`, `protocol: 1` and `files`.
-Initialization does not load configuration. This slice emits no backend events.
+Initialization does not load configuration. Empty-args preview v1 emits no
+backend events and preserves that exact reply shape.
 
 | Command | Arguments | Result / Side Effects |
 | --- | --- | --- |
@@ -66,6 +68,49 @@ hold its own operation lease for the entire response wait. The backend completes
 accepted work before checking EOF; it never kills Unity or client-owned servers.
 MCP's frontend workflow begin/finish commands are deliberately not available in
 this read-only pipe allowlist.
+
+## Revision-2 Lifecycle Preparation
+
+Explicit initialization args `{hostingRevision: 2, requestedMode: "read-only"}`
+add `hostingRevision: 2` and `effectiveMode: "read-only"` to the initialize reply.
+`writable`, unknown revisions/modes and extra args are refused before consent or
+dispatch. This source preparation is not an advertised production capability;
+the immutable older preview artifact remains unchanged.
+
+Only that negotiated mode emits native frames named `creator-mcp-lifecycle`:
+
+```json
+{"type":"event","name":"creator-mcp-lifecycle","session":"<64 hex characters>","payload":{"revision":1,"sequence":0,"state":"idle","workflowActive":false,"commandsInFlight":0}}
+```
+
+Events are at most 512 UTF-8 bytes including newline. Sequence is monotonic and
+bounded to JavaScript's safe integer range. State is `idle`, `busy` or `draining`;
+the in-flight count refers to accepted serialized hosted requests. Initial idle,
+pre-dispatch busy, post-reply idle and final drained-on-EOF frames are emitted
+(when the output pipe remains writable). A failed busy-frame
+write prevents invocation; lost output after a handler returns never replays it.
+
+The native session controller owns any workflow receipt across commands and
+rejects foreign/stale finish receipts. Disconnection refuses new work, drains
+the already-accepted synchronous request, then releases only its owned workflow.
+Its last 16 in-memory records distinguish a returned Rust `Result::Ok` from an
+error or unwound handler. They do not establish success of nested/asynchronous
+operations and are **not durable crash recovery or a full result handoff**.
+Writable session construction exists only in tests; no production mutable
+allowlist or writable initializer has been enabled.
+
+Compatible standalone Windows GUIs reserve an exclusive `launcher-gui.lock`
+handle in the current user's settings directory before building the writable
+UI. File identity handles case/path aliases; Windows denies replacement while
+owned, and normal handle release permits reopening. The marker is not deleted
+or truncated. Metadata and read-only hosting bypass acquisition entirely.
+Older launchers lacking this lock are explicitly outside that guarantee.
+
+Hub must reserve its own workflow guard **before** forwarding begin, hold it
+across native replies and command gaps, and never unlock solely from a child
+idle event. Signed descriptor revision/modes, verified host identity, explicit
+consent, legacy-GUI handling, durable outcomes and acknowledged form/result
+transfer remain required before full writable adoption can be enabled.
 
 ## Verification And Remaining Gates
 

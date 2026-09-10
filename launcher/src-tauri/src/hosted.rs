@@ -40,6 +40,17 @@ struct Request {
 #[serde(deny_unknown_fields)]
 struct NoArgs {}
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct InitializeArgs {
+    hosting_revision: u32,
+    requested_mode: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowArgs {
+    id: u32,
+}
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UrlArgs {
     url: String,
@@ -208,7 +219,18 @@ fn serve(
     if hello.id != 0 || hello.command != "initialize" {
         return Err("Expected hosted initialization.".into());
     }
-    decode::<NoArgs>(hello.args)?;
+    let lifecycle_events = if hello.args.as_object().is_some_and(|args| args.is_empty()) {
+        false
+    } else {
+        let args = decode::<InitializeArgs>(hello.args)?;
+        if args.hosting_revision != 2 || args.requested_mode != "read-only" {
+            return Err(
+                "Only read-only hosting revision 2 is available; writable adoption is not enabled."
+                    .into(),
+            );
+        }
+        true
+    };
     if !approve() {
         send(
             output,
@@ -218,14 +240,22 @@ fn serve(
         )?;
         return Ok(());
     }
-    send(
-        output,
+    let mut initialization = json!({"appId": "creator-works-mcp", "version": env!("CARGO_PKG_VERSION"), "protocol": 1, "files": files});
+    if lifecycle_events {
+        initialization["hostingRevision"] = json!(2);
+        initialization["effectiveMode"] = json!("read-only");
+    }
+    send(output, &hello.session, 0, Ok(initialization))?;
+    let mut native_session = crate::hosted_lifecycle::HostedSession::read_only(
+        &crate::lifecycle::LIFECYCLE,
         &hello.session,
-        0,
-        Ok(
-            json!({"appId": "creator-works-mcp", "version": env!("CARGO_PKG_VERSION"), "protocol": 1, "files": files}),
-        ),
     )?;
+    if lifecycle_events {
+        output
+            .write_all(&native_session.event()?)
+            .and_then(|_| output.flush())
+            .map_err(|_| "Host disconnected before ready state.")?;
+    }
     let mut previous_id = 0;
     while let Some(request) = read_request(input)? {
         if request.session != hello.session || request.id <= previous_id {
@@ -235,9 +265,44 @@ fn serve(
         if !COMMANDS.contains(&request.command.as_str()) {
             return Err("Unknown hosted MCP command.".into());
         }
-        let result = call(&request.command, request.args);
+        native_session.begin_command(request.id, &request.command)?;
+        if lifecycle_events {
+            output
+                .write_all(&native_session.event()?)
+                .and_then(|_| output.flush())
+                .map_err(|_| "Host disconnected before dispatch; command was not invoked.")?;
+        }
+        let result = match request.command.as_str() {
+            // These remain outside COMMANDS and cannot currently be invoked.
+            // Even if mistakenly listed, read-only sessions refuse workflow authority.
+            "begin_ui_operation" => native_session
+                .begin_workflow()
+                .map(|id| json!(id))
+                .map_err(String::from),
+            "finish_ui_operation" => decode::<WorkflowArgs>(request.args).and_then(|args| {
+                native_session
+                    .finish_workflow(args.id)
+                    .map(|_| Value::Null)
+                    .map_err(String::from)
+            }),
+            _ => call(&request.command, request.args),
+        };
+        native_session.complete_command(result.is_ok())?;
         // Complete an accepted command before observing EOF; never replay after a lost reply.
         send(output, &hello.session, request.id, result)?;
+        if lifecycle_events {
+            output
+                .write_all(&native_session.event()?)
+                .and_then(|_| output.flush())
+                .map_err(|_| "Host disconnected after completion; command will not be replayed.")?;
+        }
+    }
+    native_session.disconnect()?;
+    if lifecycle_events {
+        output
+            .write_all(&native_session.event()?)
+            .and_then(|_| output.flush())
+            .map_err(|_| "Host disconnected after draining; no command will be replayed.")?;
     }
     Ok(())
 }
@@ -360,6 +425,103 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn revision_two_is_explicit_read_only_and_has_bounded_ordered_events() {
+        let hello = request(0, "initialize").replace(
+            "\"args\":{}",
+            "\"args\":{\"hostingRevision\":2,\"requestedMode\":\"read-only\"}",
+        );
+        let input = hello + &request(1, COMMANDS[0]);
+        let mut output = Vec::new();
+        let mut calls = 0;
+        serve(
+            &mut input.as_bytes(),
+            &mut output,
+            BTreeMap::new(),
+            || true,
+            |_, _| {
+                calls += 1;
+                Ok(json!({"readOnly":true}))
+            },
+        )
+        .unwrap();
+        assert_eq!(calls, 1);
+        let frames = replies(&output);
+        assert_eq!(frames[0]["result"]["hostingRevision"], 2);
+        assert_eq!(frames[0]["result"]["effectiveMode"], "read-only");
+        let events: Vec<_> = frames
+            .iter()
+            .filter(|frame| frame["type"] == "event")
+            .collect();
+        assert_eq!(events.len(), 4);
+        for (index, event) in events.iter().enumerate() {
+            assert_eq!(event["name"], "creator-mcp-lifecycle");
+            assert_eq!(event["payload"]["sequence"], index as u64);
+            assert!(serde_json::to_vec(event).unwrap().len() < 512);
+        }
+        assert_eq!(events[0]["payload"]["state"], "idle");
+        assert_eq!(events[1]["payload"]["state"], "busy");
+        assert_eq!(events[2]["payload"]["state"], "idle");
+        assert_eq!(events[3]["payload"]["state"], "draining");
+        assert_eq!(events[3]["payload"]["commandsInFlight"], 0);
+        assert_eq!(frames[3]["id"], 1);
+    }
+
+    #[test]
+    fn writable_or_unknown_initialization_never_prompts_or_dispatches() {
+        for args in [
+            json!({"hostingRevision":2,"requestedMode":"writable"}),
+            json!({"hostingRevision":3,"requestedMode":"read-only"}),
+            json!({"hostingRevision":2,"requestedMode":"read-only","consent":true}),
+        ] {
+            let input =
+                request(0, "initialize").replace("\"args\":{}", &format!("\"args\":{args}"));
+            let mut output = Vec::new();
+            assert!(serve(
+                &mut input.as_bytes(),
+                &mut output,
+                BTreeMap::new(),
+                || panic!("invalid mode prompted"),
+                |_, _| panic!("invalid mode dispatched")
+            )
+            .is_err());
+            assert!(output.is_empty());
+        }
+    }
+
+    #[test]
+    fn lost_busy_event_does_not_invoke_the_native_command() {
+        struct FailBusy {
+            writes: u32,
+        }
+        impl Write for FailBusy {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.writes += 1;
+                if self.writes == 3 {
+                    return Err(std::io::ErrorKind::BrokenPipe.into());
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let hello = request(0, "initialize").replace(
+            "\"args\":{}",
+            "\"args\":{\"hostingRevision\":2,\"requestedMode\":\"read-only\"}",
+        );
+        let input = hello + &request(1, COMMANDS[0]);
+        let mut output = FailBusy { writes: 0 };
+        assert!(serve(
+            &mut input.as_bytes(),
+            &mut output,
+            BTreeMap::new(),
+            || true,
+            |_, _| panic!("command invoked after busy delivery failed")
+        )
+        .is_err());
     }
     #[test]
     fn initialization_and_decline_never_dispatch_a_command() {

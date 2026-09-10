@@ -2,7 +2,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod feedback;
+#[cfg(windows)]
+mod gui_owner;
 mod hosted;
+mod hosted_lifecycle;
 mod hub;
 mod jsonc;
 mod lifecycle;
@@ -2066,6 +2069,22 @@ fn main() {
         }
         return;
     }
+
+    // Reserve settings ownership before a writable UI can load/migrate config.
+    // Metadata and the read-only hosted entry above do not create lock files.
+    #[cfg(windows)]
+    let _gui_owner = match gui_owner::GuiWriteOwner::current_user() {
+        Ok(owner) => owner,
+        Err(error) => {
+            let code = if error == gui_owner::OwnershipError::Busy {
+                10
+            } else {
+                11
+            };
+            gui_owner::show_blocked(error);
+            std::process::exit(code);
+        }
+    };
 
     // Linux-only: work around WebKitGTK failures on Wayland sessions and
     // certain GPU drivers where the DMA-BUF renderer can't allocate a

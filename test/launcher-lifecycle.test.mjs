@@ -5,6 +5,17 @@ import test from 'node:test';
 const main = fs.readFileSync('launcher/src-tauri/src/main.rs', 'utf8');
 const lifecycle = fs.readFileSync('launcher/src-tauri/src/lifecycle.rs', 'utf8');
 
+test('writable Windows UI reserves settings ownership after read-only entries and before building UI', () => {
+  const entry = main.slice(main.indexOf('fn main()'));
+  assert.ok(entry.indexOf('hosted::run()') < entry.indexOf('GuiWriteOwner::current_user()'));
+  assert.ok(entry.indexOf('GuiWriteOwner::current_user()') < entry.indexOf('tauri::Builder::default()'));
+  assert.match(entry, /let _gui_owner = match/);
+  const owner = fs.readFileSync('launcher/src-tauri/src/gui_owner.rs', 'utf8');
+  assert.match(owner, /dirs::config_dir\(\)/);
+  assert.match(owner, /\.share_mode\(0\)/);
+  assert.match(owner, /\.truncate\(false\)/);
+});
+
 test('every app command uses a completion-lifetime guard and async additions require an audit', () => {
   assert.match(main, /\.invoke_handler\(\|invoke\| \{\s*let Ok\(_command\) = lifecycle::LIFECYCLE.command\(\)/);
   assert.match(main, /handler\(invoke\)/);
