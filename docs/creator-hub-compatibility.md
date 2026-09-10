@@ -106,6 +106,66 @@ Observed locally on Windows x64, 2026-09-10:
   is its synchronized version constant only; Unity runtime acceptance was not
   performed. No installer was built, installed or swapped.
 
+## Standalone Launcher UI
+
+The next-version UI follows the shared Creator Project Setup/Hub visual spec:
+neutral `#090b0d` background, `#111518` / `#181d21` surfaces, `#293137` borders,
+`#edf1f3` text, `#9ba7af` secondary text, cyan/red accents and Segoe UI/Arial.
+The final shared alignment uses a 72px header, 19px title, 13px body and 15px
+section headings. The original bitmap is unchanged (SHA-256
+`f3f68baa0d887de92e6cf7aba8beae7ff8ea5c44b13444f018413041ade19ea7`).
+
+- Fixed left-edge tab: 54x48 at x=0/y=12; menu: 224px at x=8/y=68.
+- Cube marks use lower-right H/M/P identifiers, not notifications. Hub has the
+  shared gray outer frame. There are no hamburger lines or first-run hero.
+- Creator Hub opens only the [public plan](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md)
+  and is labeled in development. Setup opens its [public releases](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases).
+  MCP is current; URP Converter is non-actionable and labeled coming soon.
+- No executable discovery/launch, hosted-mode inference, URL-parameter mode,
+  installation prompt, automatic installation or new configuration key exists.
+  Standalone chrome remains; any future hosted suppression needs explicit host
+  context. The native identity flag and capability list are unchanged.
+- Keyboard menu navigation includes arrows, Home/End, Enter/Space, Escape and
+  Tab; close/outside/focus dismissal and focus return are tested. Project
+  selection is a native button, not a mouse-only row.
+- A disabled ancestor fieldset prevents conflicting project/client/preference
+  changes during an operation, including controls rendered while busy. Each
+  control's own unavailable/consent state survives unlocking. Editing the
+  selected path invalidates old readiness until a fresh check returns; stale
+  and out-of-order readiness responses cannot enable setup for another target.
+- Existing capabilities, client choices, privacy/consent and manual-install
+  text remain. SDK/bridge badges wrap instead of disappearing on narrow screens.
+
+Browser smoke (requires an existing Playwright installation and browser):
+
+```powershell
+# Optional: absolute path to an existing Playwright package; otherwise resolves locally.
+$env:PLAYWRIGHT_MODULE = 'C:\Tools\node_modules\playwright'
+# Optional: use installed Chrome with a temporary, isolated browser profile.
+$env:PLAYWRIGHT_CHANNEL = 'chrome'
+node scripts/smoke-launcher-ui.mjs
+```
+
+The script starts a temporary loopback-only fixture server and mocks every Tauri
+command. Other network requests are blocked. Server/browser close on success or
+failure; it never runs the launcher or invokes actual project/client setup.
+Screenshots and `results.json` are written under `artifacts/launcher-ui/`.
+Viewport coverage: 900x700, 640x600, minimum desktop 560x600, 390x844 and 320x700,
+including long unbroken project names, long SDK labels and expanded Advanced.
+
+The initial smoke hit a test-only missing bundled Chromium executable; using
+an existing Chrome installation resolved it without adding dependencies. One
+outside-click assertion targeted content under the open menu and was corrected.
+The narrow-label test caught real badge overflow; wrapping now passes. These
+browser checks do not prove native WebView2 integration or real installation.
+
+Final UI-pass verification on Windows, 2026-09-10: 203 Node tests and 27 Rust
+tests passed. Browser smoke passed all listed viewports, keyboard project
+selection, public-link failures, picker cancellation, duplicate suppression,
+operation success/failure recovery and delayed/invalid readiness. Version sync
+and Rust formatting passed. Native metadata acceptance remains a separate
+test from the mocked browser UI, not proof of safe installation or updating.
+
 ## Before Release Or Hub Adoption
 
 1. Review the next-version diff and platform CI. Recheck packaged executables,

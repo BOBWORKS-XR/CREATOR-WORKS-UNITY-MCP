@@ -10,6 +10,15 @@ The Windows launcher bundles the unmodified official Node.js 24.17.0 Windows x64
 
 The Windows launcher uses [Tauri](https://github.com/tauri-apps/tauri), distributed under Apache-2.0 and MIT terms. GitHub release packaging uses the official [Tauri Action](https://github.com/tauri-apps/tauri-action); the action is CI infrastructure and is not shipped in the application.
 
+## Launcher Icons
+
+The app switcher's `x` and `external-link` SVGs are unmodified assets from
+[Lucide](https://github.com/lucide-icons/lucide), `lucide-static` 1.44.0. Lucide
+uses ISC terms; these Feather-derived icons also carry the upstream MIT notice.
+The complete notice is included at `launcher/src/icons/LICENSE-lucide` alongside
+the assets. No icon runtime dependency is added. The cube bitmap remains the
+existing Creator Works logo.
+
 ## Unity MCP Research
 
 The following MIT-licensed projects were reviewed for public documentation, installation verification, focused-tool design, testing, and client-configuration ideas:

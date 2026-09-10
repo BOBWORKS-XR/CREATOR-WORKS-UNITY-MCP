@@ -273,7 +273,10 @@ Looking for the former **BANTWORKS MCP** name or old launcher layout? [Open the 
 
 This development branch adds the [Creator Hub identity foundation](docs/creator-hub-compatibility.md)
 for `2.7.0-alpha.1`: a read-only launcher metadata flag, not a Hub application,
-single-instance guarantee or automatic updater. Stable downloads above remain
+single-instance guarantee or automatic updater. The launcher also has compact
+shared Creator styling and an accessible app switcher with public plan/release
+links only. Project and configuration controls lock during operations; SDK and
+bridge status stay visible on narrow windows. Stable downloads above remain
 2.6.0; no current installed app needs to change for this source-only work.
 
 ```powershell

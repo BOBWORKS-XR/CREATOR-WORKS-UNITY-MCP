@@ -15,12 +15,14 @@ let projectStatusTimer = null;
 let updateTimer = null;
 let releaseUrl = null;
 let feedbackRequest = 0;
+let onboardingRequest = 0;
+let operationActive = false;
 
 const elements = {};
 
 document.addEventListener('DOMContentLoaded', async function() {
   for (const id of [
-    'status', 'runtimeBadge', 'projectPath', 'browseProjectBtn', 'discoveredProjects',
+    'workspaceControls', 'status', 'runtimeBadge', 'projectPath', 'browseProjectBtn', 'discoveredProjects',
     'connectCodex', 'connectClaude', 'connectAntigravity', 'connectOpenCode',
     'codexDetection', 'claudeDetection', 'antigravityDetection', 'opencodeDetection',
     'codexState', 'claudeState', 'antigravityState', 'opencodeState',
@@ -55,12 +57,38 @@ document.addEventListener('DOMContentLoaded', async function() {
   } catch (error) {
     console.error('Launcher initialization failed:', error);
     showToast('Failed to initialize launcher: ' + String(error), 'error');
+  } finally {
+    elements.workspaceControls.disabled = false;
+    updateSetupButton();
   }
 });
 
+// An ancestor fieldset locks even freshly rendered controls without overwriting
+// their own disabled states (for example unavailable feedback or setup).
+async function runUIOperation(action) {
+  if (operationActive) return;
+  operationActive = true;
+  elements.workspaceControls.disabled = true;
+  elements.workspaceControls.setAttribute('aria-busy', 'true');
+  try {
+    await action();
+  } catch (error) {
+    showToast('Action failed: ' + String(error), 'error');
+  } finally {
+    operationActive = false;
+    elements.workspaceControls.disabled = false;
+    elements.workspaceControls.removeAttribute('aria-busy');
+    updateSetupButton();
+  }
+}
+
+function onOperation(element, event, action) {
+  element.addEventListener(event, () => runUIOperation(action));
+}
+
 function setupEventListeners() {
-  elements.localFeedback.addEventListener('change', saveFeedbackSettings);
-  elements.usageCheckIns.addEventListener('change', saveFeedbackSettings);
+  onOperation(elements.localFeedback, 'change', saveFeedbackSettings);
+  onOperation(elements.usageCheckIns, 'change', saveFeedbackSettings);
   elements.checkUpdatesBtn.addEventListener('click', checkForUpdates);
   elements.openReleaseBtn.addEventListener('click', async function() {
     if (releaseUrl) {
@@ -68,7 +96,7 @@ function setupEventListeners() {
       catch (error) { elements.updateStatus.textContent = 'Could not open release: ' + String(error); }
     }
   });
-  elements.automaticUpdates.addEventListener('change', async function() {
+  onOperation(elements.automaticUpdates, 'change', async function() {
     const previous = config.automatic_update_checks === true;
     config.automatic_update_checks = elements.automaticUpdates.checked;
     if (!await saveLauncherConfig('Failed to save update preference')) {
@@ -77,22 +105,26 @@ function setupEventListeners() {
     }
     scheduleUpdateChecks();
   });
-  elements.browseProjectBtn.addEventListener('click', chooseProjectForSetup);
-  elements.addProjectBtn.addEventListener('click', addProjectFromPicker);
-  elements.updateBridgesBtn.addEventListener('click', updateConfiguredBridges);
+  onOperation(elements.browseProjectBtn, 'click', chooseProjectForSetup);
+  onOperation(elements.addProjectBtn, 'click', addProjectFromPicker);
+  onOperation(elements.updateBridgesBtn, 'click', updateConfiguredBridges);
 
   elements.projectPath.addEventListener('input', function() {
     elements.localFeedback.disabled = true;
     elements.usageCheckIns.disabled = true;
     selectedProjectPath = elements.projectPath.value.trim();
+    onboarding = null;
+    updateSetupButton();
     clearTimeout(projectStatusTimer);
     projectStatusTimer = setTimeout(async function() {
-      await refreshOnboardingStatus();
-      updateSetupStatus();
+      try {
+        await refreshOnboardingStatus();
+        updateSetupStatus();
+      } catch (error) { showToast('Project check failed: ' + String(error), 'error'); }
     }, 250);
   });
 
-  elements.discoveredProjects.addEventListener('change', async function() {
+  onOperation(elements.discoveredProjects, 'change', async function() {
     if (!elements.discoveredProjects.value) return;
     await selectSetupProject(elements.discoveredProjects.value);
   });
@@ -101,14 +133,14 @@ function setupEventListeners() {
   elements.connectClaude.addEventListener('change', updateSetupButton);
   elements.connectAntigravity.addEventListener('change', updateSetupButton);
   elements.connectOpenCode.addEventListener('change', updateSetupButton);
-  elements.setupBtn.addEventListener('click', runQuickSetup);
+  onOperation(elements.setupBtn, 'click', runQuickSetup);
 
-  elements.mcpServerPath.addEventListener('change', async function() {
+  onOperation(elements.mcpServerPath, 'change', async function() {
     config.mcp_server_path = elements.mcpServerPath.value.trim();
     await saveLauncherConfig('Failed to save MCP server path');
   });
 
-  elements.toolGroups.addEventListener('change', async function() {
+  onOperation(elements.toolGroups, 'change', async function() {
     config.tool_groups = elements.toolGroups.value;
     await saveLauncherConfig('Failed to save capabilities');
     if (elements.autoConfig.checked && getActiveChannel()) {
@@ -116,12 +148,12 @@ function setupEventListeners() {
     }
   });
 
-  elements.autoConfig.addEventListener('change', async function() {
+  onOperation(elements.autoConfig, 'change', async function() {
     config.auto_start = elements.autoConfig.checked;
     await saveLauncherConfig('Failed to save active-project preference');
   });
 
-  elements.customScripts.addEventListener('change', async function() {
+  onOperation(elements.customScripts, 'change', async function() {
     config.enable_custom_scripts = elements.customScripts.checked;
     await saveLauncherConfig('Failed to save script preference');
     const channel = getActiveChannel();
@@ -133,7 +165,7 @@ function setupEventListeners() {
     }
   });
 
-  elements.allowAllTests.addEventListener('change', async function() {
+  onOperation(elements.allowAllTests, 'change', async function() {
     const previous = config.allow_all_tests !== false;
     const channel = getActiveChannel();
     config.allow_all_tests = elements.allowAllTests.checked;
@@ -157,15 +189,15 @@ function setupEventListeners() {
     }
   });
 
-  elements.applyConfigBtn.addEventListener('click', applyToClaudeCode);
-  elements.applyCodexBtn.addEventListener('click', applyToCodex);
-  elements.applyAntigravityBtn.addEventListener('click', applyToAntigravity);
-  elements.applyOpenCodeBtn.addEventListener('click', applyToOpenCode);
-  elements.disconnectBtn.addEventListener('click', disconnectFromClaude);
-  elements.disconnectCodexBtn.addEventListener('click', disconnectFromCodex);
-  elements.disconnectAntigravityBtn.addEventListener('click', disconnectFromAntigravity);
-  elements.disconnectOpenCodeBtn.addEventListener('click', disconnectFromOpenCode);
-  elements.installExtensionBtn.addEventListener('click', installExtension);
+  onOperation(elements.applyConfigBtn, 'click', applyToClaudeCode);
+  onOperation(elements.applyCodexBtn, 'click', applyToCodex);
+  onOperation(elements.applyAntigravityBtn, 'click', applyToAntigravity);
+  onOperation(elements.applyOpenCodeBtn, 'click', applyToOpenCode);
+  onOperation(elements.disconnectBtn, 'click', disconnectFromClaude);
+  onOperation(elements.disconnectCodexBtn, 'click', disconnectFromCodex);
+  onOperation(elements.disconnectAntigravityBtn, 'click', disconnectFromAntigravity);
+  onOperation(elements.disconnectOpenCodeBtn, 'click', disconnectFromOpenCode);
+  onOperation(elements.installExtensionBtn, 'click', installExtension);
 
   elements.openDocsBtn.addEventListener('click', openDocumentation);
   elements.githubLink.addEventListener('click', function(event) {
@@ -192,6 +224,9 @@ async function chooseProjectForSetup() {
 }
 
 async function selectSetupProject(path) {
+  clearTimeout(projectStatusTimer);
+  onboarding = null;
+  updateSetupButton();
   selectedProjectPath = String(path);
   elements.projectPath.value = selectedProjectPath;
   elements.discoveredProjects.value = discoveredProjects.some(function(project) {
@@ -247,9 +282,13 @@ async function refreshAll() {
 }
 
 async function refreshOnboardingStatus() {
-  onboarding = await window.__TAURI__.core.invoke('get_onboarding_status', {
-    unityProjectPath: selectedProjectPath || null
+  const request = ++onboardingRequest;
+  const project = selectedProjectPath;
+  const result = await window.__TAURI__.core.invoke('get_onboarding_status', {
+    unityProjectPath: project || null
   });
+  if (request !== onboardingRequest || project !== selectedProjectPath) return;
+  onboarding = result;
   await refreshFeedbackSettings();
   if (!clientSelectionInitialized) {
     const codex = getClientStatus('codex');
@@ -371,7 +410,7 @@ function updateSetupButton() {
     || elements.connectClaude.checked
     || elements.connectAntigravity.checked
     || elements.connectOpenCode.checked;
-  elements.setupBtn.disabled = !projectValid || !runtimeReady || !hasClient;
+  elements.setupBtn.disabled = operationActive || !projectValid || !runtimeReady || !hasClient;
 }
 
 async function runQuickSetup() {
@@ -424,22 +463,20 @@ function renderProjects() {
     const active = channel.id === config.active_channel_id;
     card.className = 'project-card' + (active ? ' active' : '');
     card.innerHTML =
-      '<span class="project-indicator"></span>' +
-      '<div class="project-info"><strong>' + escapeHtml(channel.name) + '</strong>' +
-      '<span>' + escapeHtml(channel.unity_project_path) + '</span></div>' +
+      '<button class="project-select" type="button" aria-pressed="' + active + '">' +
+      '<span class="project-indicator" aria-hidden="true"></span>' +
+      '<span class="project-info"><strong>' + escapeHtml(channel.name) + '</strong>' +
+      '<span>' + escapeHtml(channel.unity_project_path) + '</span></span></button>' +
       '<div class="project-meta">' + (active ? '<span class="badge active-badge">Active</span>' : '') +
       '<span class="badge sdk-badge">Checking SDK</span>' +
       '<span class="badge bridge-badge">Checking bridge</span></div>' +
       '<button class="icon-button remove-project" type="button" title="Remove project" aria-label="Remove project">' +
       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
 
-    card.addEventListener('click', async function(event) {
-      if (!event.target.closest('.remove-project')) await selectChannel(channel.id);
-    });
-    card.querySelector('.remove-project').addEventListener('click', async function(event) {
-      event.stopPropagation();
-      await removeChannel(channel.id);
-    });
+    card.querySelector('.project-select').title = channel.unity_project_path;
+    card.querySelector('.remove-project').setAttribute('aria-label', 'Remove ' + channel.name);
+    onOperation(card.querySelector('.project-select'), 'click', () => selectChannel(channel.id));
+    onOperation(card.querySelector('.remove-project'), 'click', () => removeChannel(channel.id));
     elements.projectsList.appendChild(card);
     updateBridgeBadge(channel, card.querySelector('.bridge-badge'));
     updateSdkBadge(channel, card.querySelector('.sdk-badge'));
@@ -796,6 +833,7 @@ function showToast(message, type) {
   if (existing) existing.remove();
   const toast = document.createElement('div');
   toast.className = 'toast ' + (type || 'info');
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
   toast.textContent = message;
   document.body.appendChild(toast);
   setTimeout(function() { toast.remove(); }, 4500);

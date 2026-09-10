@@ -9,6 +9,7 @@ function fixture(invoke) {
   const controls = Object.fromEntries([...source.matchAll(/elements\.(\w+)/g)].map(([, name]) => [name, {
     checked: false, disabled: false, handlers: {},
     addEventListener(event, handler) { this.handlers[event] = handler; },
+    setAttribute() {}, removeAttribute() {},
   }]));
   const messages = [];
   const context = vm.createContext({
