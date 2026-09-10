@@ -124,8 +124,10 @@ section headings. The original bitmap is unchanged (SHA-256
   of the logo. The main page title/subtitle fade while open, without resizing
   the page. A subtle scrim dims the rest of the app; click-away consumes the
   complete gesture before closing, never invoking a button underneath.
-- Cube marks use lower-right H/M/P identifiers, not notifications. Hub has the
-  shared gray outer frame. There are no hamburger lines or first-run hero.
+- Cube marks use lower-right H/M/P identifiers, not notifications. Hub uses a
+  shared three-face gray isometric cube backplate, with the original cyan/red
+  bitmap centered at 22px and H badge outside. The CSS backplate is original
+  geometry, not the Unity logo. There are no hamburger lines or first-run hero.
 - Creator Hub opens only the [public plan](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md)
   and is labeled in development. Setup opens its [public releases](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases).
   MCP is current; URP Converter is non-actionable and labeled coming soon.
@@ -185,6 +187,12 @@ the drawer is open dismisses it without invoking either operation. Screenshots
 wait for final width and height, not just visibility. `motion-results.json`
 records intermediate measurements; `drawer-midmotion.png` pauses real CSS
 transitions for an inspectable intermediate frame.
+
+The subsequent Hub-mark-only visual revision has 205 Node tests. The browser
+fixture verifies the square border/background is absent, the three flat gray
+cube faces render behind the unchanged 22px bitmap, and the outside H badge
+remains above both. All drawer motion, dismissal and operation-lock checks
+still pass; MCP and Project Setup marks are unchanged.
 
 ## Before Release Or Hub Adoption
 

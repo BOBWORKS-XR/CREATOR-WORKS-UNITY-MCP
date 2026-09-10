@@ -201,6 +201,22 @@ try {
   await toggle.click();
   await expanded();
   assert.equal(await shell.evaluate(el => el.getBoundingClientRect().width),224);
+  const hubMark = await page.locator('.app-icon-hub').evaluate(el => ({
+    border:getComputedStyle(el).borderTopWidth, radius:getComputedStyle(el).borderRadius,
+    background:getComputedStyle(el).backgroundColor, top:getComputedStyle(el,'::before').backgroundColor,
+    silhouette:getComputedStyle(el,'::before').clipPath, sides:getComputedStyle(el,'::after').backgroundImage,
+    image:{width:el.querySelector('img').width,source:el.querySelector('img').getAttribute('src')},
+    badgeLayer:getComputedStyle(el.querySelector('.app-letter')).zIndex
+  }));
+  assert.equal(hubMark.border,'0px');
+  assert.equal(hubMark.radius,'0px');
+  assert.equal(hubMark.background,'rgba(0, 0, 0, 0)');
+  assert.equal(hubMark.top,'rgb(105, 117, 127)');
+  assert.match(hubMark.silhouette,/polygon/);
+  assert.match(hubMark.sides,/rgb\(76, 89, 100\).*rgb\(52, 63, 72\)/);
+  assert.deepEqual(hubMark.image,{width:22,source:'creator-works-logo.png'});
+  assert.equal(hubMark.badgeLayer,'2');
+  checks.push('Hub gray cube backplate, original 22px bitmap and outside H badge');
   await page.screenshot({path:path.join(output,'desktop-menu.png')});
   await page.keyboard.press('Escape');
   await closed();

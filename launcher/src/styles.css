@@ -163,8 +163,24 @@ label[for] {
   text-align: center;
   width: 15px;
 }
-.app-icon-hub { border: 1px solid #61717b; border-radius: 5px; background: var(--border); }
-.app-icon-hub img { height: 26px; width: 26px; }
+.app-icon-hub { border: 0; border-radius: 0; background: transparent; }
+.app-icon-hub::before, .app-icon-hub::after {
+  content: '';
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 0;
+}
+.app-icon-hub::before {
+  background: #69757f;
+  clip-path: polygon(50% 0, 94% 25%, 94% 75%, 50% 100%, 6% 75%, 6% 25%);
+}
+.app-icon-hub::after {
+  background: linear-gradient(90deg, #4c5964 50%, #343f48 50%);
+  clip-path: polygon(6% 25%, 50% 50%, 94% 25%, 94% 75%, 50% 100%, 6% 75%);
+}
+.app-icon-hub img { height: 22px; position: relative; width: 22px; z-index: 1; }
+.app-icon-hub .app-letter { z-index: 2; }
 .app-icon-pending { color: var(--text-2); font-size: 15px; font-weight: 600; }
 .app-menu {
   left: 0;

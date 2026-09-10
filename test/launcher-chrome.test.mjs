@@ -32,6 +32,15 @@ test('drawer has one frame and closes accessibility immediately without transiti
   assert.match(css, /prefers-reduced-motion: reduce/);
 });
 
+test('Hub badge uses a three-face cube backplate without replacing the original bitmap', () => {
+  const css = fs.readFileSync('launcher/src/styles.css', 'utf8');
+  assert.match(css, /\.app-icon-hub \{ border: 0; border-radius: 0; background: transparent; \}/);
+  assert.match(css, /clip-path: polygon\(50% 0, 94% 25%, 94% 75%, 50% 100%, 6% 75%, 6% 25%\)/);
+  assert.match(css, /linear-gradient\(90deg, #4c5964 50%, #343f48 50%\)/);
+  assert.match(css, /\.app-icon-hub img \{ height: 22px; position: relative; width: 22px; z-index: 1; \}/);
+  assert.match(html, /app-icon app-icon-hub[^>]*><img src="creator-works-logo.png"/);
+});
+
 function fixture() {
   const fieldset = { disabled: false, attrs: {},
     setAttribute(name, value) { this.attrs[name] = value; },
