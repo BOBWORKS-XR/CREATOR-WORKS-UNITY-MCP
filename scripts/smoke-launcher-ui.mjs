@@ -16,6 +16,7 @@ const files = new Map([
   ['/', ['index.html', 'text/html']], ['/index.html', ['index.html', 'text/html']],
   ['/styles.css', ['styles.css', 'text/css']], ['/app.js', ['app.js', 'text/javascript']],
   ['/app-chrome.js', ['app-chrome.js', 'text/javascript']],
+  ['/runtime.js', ['runtime.js', 'text/javascript']],
   ['/updates.js', ['updates.js', 'text/javascript']], ['/creator-works-logo.png', ['creator-works-logo.png', 'image/png']],
   ['/sidequest-mark-white.svg', ['sidequest-mark-white.svg', 'image/svg+xml']],
   ['/icons/external-link.svg', ['icons/external-link.svg', 'image/svg+xml']]

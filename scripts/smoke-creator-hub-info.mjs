@@ -47,9 +47,10 @@ const configMetadata = () => watchedConfigs.map((file) => {
 });
 const beforeConfigs = configMetadata();
 
-function probe(args) {
+function probe(args, pipedInput = false) {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, args, { cwd: root, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(binary, args, { cwd: root, env, shell: false, windowsHide: true, stdio: [pipedInput ? "pipe" : "ignore", "pipe", "pipe"] });
+    if (pipedInput) child.stdin.end();
     let failure, size = 0;
     const stdout = [], stderr = [];
     const fail = (message) => { failure ??= new Error(message); child.kill(); };
@@ -87,6 +88,8 @@ try {
     ["--creator-hub-info", "--creator-hub-info"], ["--creator-hub-info=anything"], ["--creator-hub-unknown"],
     ["--creator-hub-info", "--repair"], ["--creator-hub-info", "& echo not-a-command"],
     ["--creator-hub"], ["--CREATOR-HUB-INFO"],
+    ["--creator-hub-host", "extra"], ["--creator-hub-info", "--creator-hub-host"],
+    ["--CREATOR-HUB-HOST"], ["--creator-hub-host=1"],
   ];
   for (const args of invalid) {
     const result = await probe(args);
@@ -95,10 +98,17 @@ try {
   }
   const repeated = await probe(["--creator-hub-info"]);
   assert.equal(repeated.code, 0); assert.equal(repeated.stdout, valid.stdout);
+  for (const pipedInput of [false, true]) {
+    const rejectedHost = await probe(["--creator-hub-host"], pipedInput);
+    assert.equal(rejectedHost.code, 1);
+    assert.equal(rejectedHost.stdout, "");
+    assert.match(rejectedHost.stderr, /requires private inherited|must be launched directly by Creator Hub/);
+  }
   assert.deepEqual(fs.readdirSync(root), ["untouched.txt"]);
   assert.equal(fs.readFileSync(marker, "utf8"), "metadata probe must not modify this fixture");
   assert.deepEqual(configMetadata(), beforeConfigs, "Existing configuration metadata changed during the probe; investigate attribution before claiming no side effects.");
   console.log(JSON.stringify({ success: true, sha256, identity, bytes: valid.bytes, successfulProbes: 2, rejectedProbes: invalid.length,
+    rejectedUnauthorizedHosts: 2,
     fixtureUnchanged: true, existingConfigMetadataUnchanged: true, windowsGuiSubsystem: process.platform === "win32",
     caveat: "Windows known-folder APIs may ignore environment isolation; fast-path unit/source checks remain part of no-startup proof. No normal GUI/re-open or update-safety claim." }));
 } finally {

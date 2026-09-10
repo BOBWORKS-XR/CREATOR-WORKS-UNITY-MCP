@@ -81,7 +81,7 @@ menu.addEventListener('click', async event => {
   const url = publicPages[item.dataset.appLink];
   if (!url) return;
   try {
-    await window.__TAURI__.shell.open(url);
+    await window.CreatorRuntime.openExternal(url);
   } catch {
     const message = document.createElement('div');
     message.className = 'toast error';

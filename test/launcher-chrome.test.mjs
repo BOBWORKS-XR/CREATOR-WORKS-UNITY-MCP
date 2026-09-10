@@ -60,10 +60,10 @@ function fixture() {
   const messages = [];
   const calls = [];
   const context = vm.createContext({ document: { addEventListener() {} }, fieldset, messages,
-    window: { __TAURI__: { core: { invoke: async (name, args) => {
+    window: { CreatorRuntime: { invoke: async (name, args) => {
       calls.push({name, args});
       if (name === 'begin_ui_operation') return 1;
-    } } } } });
+    } } } });
   vm.runInContext(source, context);
   vm.runInContext(`
     elements.workspaceControls = fieldset;
@@ -101,11 +101,11 @@ test('native lease refusal prevents the action; release failure preserves the op
   const f = fixture();
   let ran = false;
   f.context.action = async () => { ran = true; };
-  f.context.window.__TAURI__.core.invoke = async () => { throw new Error('closing'); };
+  f.context.window.CreatorRuntime.invoke = async () => { throw new Error('closing'); };
   await vm.runInContext('runUIOperation(action)', f.context);
   assert.equal(ran, false);
   assert.equal(f.fieldset.disabled, false);
-  f.context.window.__TAURI__.core.invoke = async name => {
+  f.context.window.CreatorRuntime.invoke = async name => {
     if (name === 'begin_ui_operation') return 42;
     throw new Error('release failed');
   };
@@ -130,7 +130,7 @@ test('a rejected operation surfaces the failure and preserves individual disable
 test('stale project checks cannot replace the selected project readiness', async () => {
   const f = fixture();
   let resolve;
-  f.context.window = { __TAURI__: { core: { invoke: () => new Promise(done => { resolve = done; }) } } };
+  f.context.window = { CreatorRuntime: { invoke: () => new Promise(done => { resolve = done; }) } };
   vm.runInContext("selectedProjectPath = 'A'; onboarding = null;", f.context);
   const pending = vm.runInContext('refreshOnboardingStatus()', f.context);
   vm.runInContext("selectedProjectPath = 'B';", f.context);
@@ -142,7 +142,7 @@ test('stale project checks cannot replace the selected project readiness', async
 test('out-of-order readiness responses for the same path keep the newest result', async () => {
   const f = fixture();
   const pending = [];
-  f.context.window = { __TAURI__: { core: { invoke: () => new Promise(done => pending.push(done)) } } };
+  f.context.window = { CreatorRuntime: { invoke: () => new Promise(done => pending.push(done)) } };
   vm.runInContext("selectedProjectPath = 'A'; onboarding = null; clientSelectionInitialized = true; refreshFeedbackSettings = async () => {};", f.context);
   const first = vm.runInContext('refreshOnboardingStatus()', f.context);
   const second = vm.runInContext('refreshOnboardingStatus()', f.context);

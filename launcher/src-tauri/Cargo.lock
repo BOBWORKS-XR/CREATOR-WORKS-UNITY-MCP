@@ -455,6 +455,7 @@ dependencies = [
 name = "creator-works-mcp-launcher"
 version = "2.7.0-alpha.1"
 dependencies = [
+ "base64 0.22.1",
  "dirs 5.0.1",
  "serde",
  "serde_json",

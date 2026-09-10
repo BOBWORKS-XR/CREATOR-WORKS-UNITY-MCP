@@ -55,6 +55,14 @@
     </header>
 
     <main class="main">
+      <section id="hostedPreview" class="hosted-preview" hidden aria-label="Hosted MCP preview">
+        <div><strong>Read-only Hub preview</strong><p id="hostedPreviewStatus" role="status">Configuration changes and bridge updates are disabled.</p></div>
+        <div class="hosted-preview-actions">
+          <button id="hostedRefresh" class="btn btn-secondary" type="button">Refresh</button>
+          <button id="hostedBrowse" class="btn btn-secondary" type="button">Browse folder</button>
+        </div>
+        <output id="hostedPickedFolder"></output>
+      </section>
       <fieldset class="workspace-controls" id="workspaceControls" aria-label="MCP configuration" disabled>
       <section class="section setup-section">
         <div class="section-header">
@@ -260,6 +268,7 @@
     </footer>
   </div>
 
+  <script src="runtime.js"></script>
   <script type="module" src="app.js"></script>
   <script type="module" src="app-chrome.js"></script>
 </body>

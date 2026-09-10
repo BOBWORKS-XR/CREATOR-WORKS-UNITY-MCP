@@ -3,18 +3,22 @@ use std::ffi::OsString;
 use std::io::Write;
 
 pub const INFO_FLAG: &str = "--creator-hub-info";
+pub const HOST_FLAG: &str = "--creator-hub-host";
 const MAX_INFO_BYTES: usize = 4096;
 
 #[derive(Debug, PartialEq)]
 pub enum EntryMode {
     Standalone,
     Info,
+    PreviewHost,
     InvalidHubArguments,
 }
 
 pub fn entry_mode(arguments: &[OsString]) -> EntryMode {
     if arguments.len() == 1 && arguments[0] == INFO_FLAG {
         EntryMode::Info
+    } else if arguments.len() == 1 && arguments[0] == HOST_FLAG {
+        EntryMode::PreviewHost
     } else if arguments.iter().any(|value| {
         value
             .to_string_lossy()
@@ -75,7 +79,7 @@ pub fn write_identity(output: &mut impl Write) -> Result<(), &'static str> {
 
 pub fn handle_entry(arguments: &[OsString]) -> Option<i32> {
     match entry_mode(arguments) {
-        EntryMode::Standalone => None,
+        EntryMode::Standalone | EntryMode::PreviewHost => None,
         EntryMode::Info => Some(match write_identity(&mut std::io::stdout().lock()) {
             Ok(()) => 0,
             Err(message) => {
@@ -84,7 +88,7 @@ pub fn handle_entry(arguments: &[OsString]) -> Option<i32> {
             }
         }),
         EntryMode::InvalidHubArguments => {
-            eprintln!("Use --creator-hub-info alone; no other Hub arguments are accepted.");
+            eprintln!("Use --creator-hub-info alone, or --creator-hub-host alone; no other Hub arguments are accepted.");
             Some(2)
         }
     }
@@ -93,6 +97,18 @@ pub fn handle_entry(arguments: &[OsString]) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hosting_is_an_exact_preview_entry_not_an_advertised_capability() {
+        assert_eq!(entry_mode(&[HOST_FLAG.into()]), EntryMode::PreviewHost);
+        for args in [
+            vec![HOST_FLAG.into(), "extra".into()],
+            vec![HOST_FLAG.into(), INFO_FLAG.into()],
+            vec!["--CREATOR-HUB-HOST".into()],
+            vec!["--creator-hub-host=1".into()],
+        ] {
+            assert_eq!(entry_mode(&args), EntryMode::InvalidHubArguments);
+        }
+    }
 
     fn args(values: &[&str]) -> Vec<OsString> {
         values.iter().map(OsString::from).collect()

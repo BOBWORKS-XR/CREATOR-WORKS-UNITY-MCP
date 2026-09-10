@@ -279,6 +279,17 @@ links only. Project and configuration controls lock during operations; SDK and
 bridge status stay visible on narrow windows. Stable downloads above remain
 2.6.0; no current installed app needs to change for this source-only work.
 
+The approved [Creator Hub direction](docs/creator-hub-compatibility.md#required-product-direction)
+is one host window displaying the real installed apps with shared chrome,
+existing files/settings and standalone fallback. This branch now includes a
+[read-only MCP hosting preview](docs/creator-hub-hosted-preview.md) using the
+Setup-first protocol: the same UI with a native settings snapshot and folder
+picker, without configuration writes or bridge updates. This is **not full Hub
+readiness**: real Hub/MCP acceptance, live state transfer, shortcut routing and
+safe adoption remain required. Metadata still advertises standalone only. Adoption
+and any required compatibility update need explicit consent; declining leaves
+the app unchanged and standalone. Hub-only installation remains available.
+
 ```powershell
 git clone https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP.git
 Set-Location CREATOR-WORKS-UNITY-MCP

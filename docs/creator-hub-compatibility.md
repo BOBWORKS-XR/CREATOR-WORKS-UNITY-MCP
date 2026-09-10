@@ -6,6 +6,68 @@ The [shared Creator Hub plan](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SET
 owns the wider product and distribution scope. First-launch SDK assistance
 belongs in Hub, not another MCP companion prompt.
 
+## Required Product Direction
+
+User correction, 2026-09-10: **Creator Hub is one host window containing the
+actual installed app interfaces, not a manager that opens independent GUI
+windows.** Hosting is required for the first Hub experience, not an optional
+later enhancement. The existing identity, styling, packaging and close-guard
+work is groundwork only. The branch now adds a bounded
+[read-only hosted adapter](creator-hub-hosted-preview.md), not full hosting or
+adoption readiness. The actual Hub/MCP binary pair still requires acceptance.
+
+- During Hub setup, detect existing Creator apps and ask **Update and add to
+  Hub**, showing the apps and required compatibility updates. Update only
+  approved apps where necessary, then adopt their existing files and settings.
+  Compatible apps need the same adoption consent but no reinstall.
+- If no apps are found, or the user chooses Not now, install Hub alone. Leave
+  standalone apps, settings, shortcuts and processes unchanged. Do not install
+  missing companion apps automatically; retain an explicit later adoption action.
+- Failed/cancelled compatibility updates must not mark adoption complete,
+  hide a working standalone UI or reroute its shortcut. Retrying must not create
+  duplicate installations. Later-discovered apps get the same consent flow.
+- MCP keeps one UI/backend implementation with standalone and hosted adapters.
+  Hub supplies the outer window/navigation; hosted MCP has no duplicate Creator
+  menu or visible top-level window. A separate headless backend is permitted.
+- After verified adoption, existing app shortcuts select that app inside the
+  existing Hub window, starting Hub when needed without opening two windows.
+  This documentation step does not change any shortcut or installation.
+- Open apps hand off only when idle, retaining selected project, forms and
+  results. Do not hide/close the standalone presentation until its hosted UI
+  is ready and state retained. View switching must not rerun setup, recreate
+  projects, reset selection or reconnect healthy MCP clients unnecessarily.
+- Missing, unavailable or removed Hub, or a failed supported handoff, leaves
+  MCP independently usable with its standalone menu. Unity, client-owned stdio
+  servers, bridge connections and pending work remain independent and untouched.
+- Require explicit verified native host context, never URL parameters, a Hub
+  directory, installed presence or an unverified executable. No foreign EXE
+  window reparenting, imitation app UI or permanent merge of all tools into Hub.
+- Legacy releases require a compatible update before hosting. Distinguish
+  Installed, Needs compatibility update and Ready in Hub. Discovery or native
+  close protocol 1 alone cannot establish hosting readiness.
+
+### Agreed Next Order
+
+1. Hub/Setup owns the Setup-first native shell/UI/backend proof and the shared
+   preview v1 pipe/MessageChannel contract. MCP's first read-only slice now uses
+   that agreed contract without changing its envelope.
+2. Validate the read-only MCP adapter through the real Hub using a pinned MCP
+   executable. Preserve metadata, existing settings and independent MCP clients.
+   Browser fixtures alone cannot close this gate.
+3. Prove shortcut routing, concurrent opens, idle state-preserving handoff,
+   offline/failure behavior and standalone fallback. Require one usable visible
+   window and one settings location, including Hub-only/declined onboarding.
+4. Extend MCP beyond read-only only with audited native command validation and
+   long-operation acceptance. Preserve selection/forms/results, healthy client sessions,
+   bridge connections and manually arranged Unity content.
+5. Integrate verified package/download/update handling and selected-view
+   restoration. Test busy switching, backend failure, upgrades, Hub removal,
+   cancelled updates and later adoption without forced shutdown or duplicates.
+
+The preview is development-only, with no installer, adoption or bridge update.
+The [shared plan](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md)
+is owned by the Hub/Setup task; MCP owns only its runtime/backend adapter.
+
 ## Read-Only Identity
 
 Invoke the trusted next-version launcher executable with exactly one argument:
@@ -141,8 +203,10 @@ section headings. The original bitmap is unchanged (SHA-256
   no converter feed, community backend, store, account or installation exists.
 - No executable discovery/launch, hosted-mode inference, URL-parameter mode,
   installation prompt, automatic installation or new configuration key exists.
-  Standalone chrome remains; any future hosted suppression needs explicit host
-  context. The native identity flag and capability list are unchanged. New
+  Standalone chrome remains in standalone mode. The read-only preview suppresses
+  it only after the explicit parent MessagePort connection; native hosting also
+  requires the pipe checks and consent described in the preview contract.
+  Full adoption/handoff remains unimplemented. The identity capability list is unchanged. New
   native operation leases additionally protect closing during UI workflows.
 - Keyboard menu navigation includes arrows, Home/End, Enter/Space, Escape and
   Tab; logo/outside/focus dismissal and focus return are tested. Closed menu
@@ -205,6 +269,10 @@ still pass; MCP and Project Setup marks are unchanged.
 
 ## Before Release Or Hub Adoption
 
+Hosted adoption follows the Setup-first order above. The current launcher UI,
+metadata and close guard must not be described as the one-window experience.
+These additional packaging gates still apply:
+
 1. Review the next-version diff and platform CI. Recheck packaged executables,
    Windows release-subsystem stdout, macOS app entrypoint and Linux packaging.
    Keep current public tags/assets immutable; alpha is not a stable release.
@@ -215,9 +283,9 @@ still pass; MCP and Project Setup marks are unchanged.
 3. Establish authenticated catalog publication/verification and key rotation,
    bounded archive extraction and explicit installation consent. The Hub owns
    discovery/comparison/download orchestration; this patch adds none of them.
-4. Prove native re-open, running-server detection, cancellation and update
-   safety before Hub adopts those operations. A successful metadata probe
-   does not fulfill these separate acceptance gates.
+4. Prove hosted shortcut routing/re-open, state-preserving handoff, independent
+   server protection, cancellation and update safety before adoption. Metadata
+   or guarded close success does not fulfill those acceptance gates.
 
 No Hub shell, functional Creator Converter, community directory backend,
 automatic updater, installation swap, Unity project mutation, client-config

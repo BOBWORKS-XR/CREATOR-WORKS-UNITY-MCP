@@ -38,15 +38,21 @@ document.addEventListener('DOMContentLoaded', async function() {
     elements[id] = document.getElementById(id);
   }
 
+  try { await window.CreatorRuntime.ready; }
+  catch (error) { showToast(String(error), 'error'); return; }
+  if (window.CreatorRuntime.hosted) {
+    await initializeHostedPreview();
+    return;
+  }
   setupEventListeners();
-  window.__TAURI__.event?.listen('creator-lifecycle-close-blocked', () => {
+  window.CreatorRuntime.listen('creator-lifecycle-close-blocked', () => {
     showToast('Finish the current operation before closing Creator Works MCP.', 'error');
   }).catch(error => console.error('Close notification unavailable:', error));
 
   await runUIOperation(async () => {
     const results = await Promise.all([
-      window.__TAURI__.core.invoke('load_config'),
-      window.__TAURI__.core.invoke('discover_unity_projects')
+      window.CreatorRuntime.invoke('load_config'),
+      window.CreatorRuntime.invoke('discover_unity_projects')
     ]);
     config = results[0];
     discoveredProjects = results[1];
@@ -60,6 +66,63 @@ document.addEventListener('DOMContentLoaded', async function() {
   });
 });
 
+async function initializeHostedPreview() {
+  const preview = document.getElementById('hostedPreview');
+  const status = document.getElementById('hostedPreviewStatus');
+  const refresh = document.getElementById('hostedRefresh');
+  const browse = document.getElementById('hostedBrowse');
+  let disconnected = false;
+  let busy = false;
+  preview.hidden = false;
+  elements.workspaceControls.disabled = true;
+  // Never run normal startup here: load_config and discovery can persist migrations.
+  async function perform(action) {
+    if (disconnected || busy) return;
+    busy = true;
+    refresh.disabled = browse.disabled = true;
+    preview.setAttribute('aria-busy', 'true');
+    try { await action(); }
+    catch (error) { status.textContent = String(error); }
+    finally {
+      busy = false;
+      preview.removeAttribute('aria-busy');
+      refresh.disabled = browse.disabled = disconnected;
+    }
+  }
+  await window.CreatorRuntime.listen('creator-runtime-disconnected', ({ payload }) => {
+    disconnected = true;
+    refresh.disabled = browse.disabled = true;
+    status.textContent = payload;
+  });
+  async function readSnapshot() {
+    const snapshot = await window.CreatorRuntime.invoke('get_hosted_snapshot');
+    config = snapshot.config || { channels: [], active_channel_id: null };
+    discoveredProjects = config.channels.map(channel => ({ name: channel.name, path: channel.unity_project_path }));
+    selectedProjectPath = getActiveChannel()?.unity_project_path || '';
+    elements.projectPath.value = selectedProjectPath;
+    renderDiscoveredProjects();
+    updateUI();
+    elements.runtimeBadge.textContent = 'Not checked';
+    for (const row of document.querySelectorAll('.check-row')) {
+      row.className = 'check-row pending';
+      row.querySelector('strong').textContent = 'Not checked';
+    }
+    for (const client of ['codex', 'claude', 'antigravity', 'opencode']) {
+      elements[client + 'Detection'].textContent = 'Not checked';
+      elements[client + 'State'].textContent = 'Not checked';
+    }
+    status.textContent = snapshot.config
+      ? 'Saved configuration loaded (' + snapshot.source + '). Changes and bridge updates are disabled.'
+      : 'No saved configuration. Changes and bridge updates are disabled.';
+  }
+  refresh.addEventListener('click', () => perform(readSnapshot));
+  browse.addEventListener('click', () => perform(async () => {
+    const selected = await window.CreatorRuntime.openDialog({ directory: true, multiple: false });
+    if (selected) document.getElementById('hostedPickedFolder').textContent = selected;
+  }));
+  await perform(readSnapshot);
+}
+
 // An ancestor fieldset locks even freshly rendered controls without overwriting
 // their own disabled states (for example unavailable feedback or setup).
 async function runUIOperation(action) {
@@ -69,13 +132,13 @@ async function runUIOperation(action) {
   elements.workspaceControls.setAttribute('aria-busy', 'true');
   let lease;
   try {
-    lease = await window.__TAURI__.core.invoke('begin_ui_operation');
+    lease = await window.CreatorRuntime.invoke('begin_ui_operation');
     await action();
   } catch (error) {
     showToast('Action failed: ' + String(error), 'error');
   } finally {
     if (lease !== undefined) {
-      try { await window.__TAURI__.core.invoke('finish_ui_operation', { id: lease }); }
+      try { await window.CreatorRuntime.invoke('finish_ui_operation', { id: lease }); }
       catch (error) {
         showToast('Operation lock could not be released: ' + String(error), 'error');
         return;
@@ -98,7 +161,7 @@ function setupEventListeners() {
   elements.checkUpdatesBtn.addEventListener('click', checkForUpdates);
   elements.openReleaseBtn.addEventListener('click', async function() {
     if (releaseUrl) {
-      try { await window.__TAURI__.shell.open(releaseUrl); }
+      try { await window.CreatorRuntime.openExternal(releaseUrl); }
       catch (error) { elements.updateStatus.textContent = 'Could not open release: ' + String(error); }
     }
   });
@@ -164,7 +227,7 @@ function setupEventListeners() {
     await saveLauncherConfig('Failed to save script preference');
     const channel = getActiveChannel();
     if (channel) {
-      await window.__TAURI__.core.invoke('set_unity_custom_scripts', {
+      await window.CreatorRuntime.invoke('set_unity_custom_scripts', {
         unityProjectPath: channel.unity_project_path,
         enabled: config.enable_custom_scripts
       });
@@ -183,7 +246,7 @@ function setupEventListeners() {
         return;
       }
       if (channel) {
-        await window.__TAURI__.core.invoke('set_unity_allow_all_tests', {
+        await window.CreatorRuntime.invoke('set_unity_allow_all_tests', {
           unityProjectPath: channel.unity_project_path,
           enabled: config.allow_all_tests
         });
@@ -213,7 +276,7 @@ function setupEventListeners() {
 }
 
 async function chooseProjectFolder() {
-  return await window.__TAURI__.dialog.open({
+  return await window.CreatorRuntime.openDialog({
     directory: true,
     multiple: false,
     title: 'Select Unity Project Folder'
@@ -248,13 +311,13 @@ async function addProjectFromPicker() {
   try {
     const selected = await chooseProjectFolder();
     if (!selected) return;
-    const channel = await window.__TAURI__.core.invoke('add_project', { projectPath: selected });
+    const channel = await window.CreatorRuntime.invoke('add_project', { projectPath: selected });
     const existing = config.channels.find(function(item) {
       return samePath(item.unity_project_path, channel.unity_project_path);
     });
     if (!existing) config.channels.push(channel);
     config.active_channel_id = existing ? existing.id : channel.id;
-    await window.__TAURI__.core.invoke('save_config', { config: config });
+    await window.CreatorRuntime.invoke('save_config', { config: config });
     selectedProjectPath = channel.unity_project_path;
     elements.projectPath.value = selectedProjectPath;
     await refreshAll();
@@ -280,8 +343,8 @@ function renderDiscoveredProjects() {
 }
 
 async function refreshAll() {
-  config = await window.__TAURI__.core.invoke('load_config');
-  discoveredProjects = await window.__TAURI__.core.invoke('discover_unity_projects');
+  config = await window.CreatorRuntime.invoke('load_config');
+  discoveredProjects = await window.CreatorRuntime.invoke('discover_unity_projects');
   renderDiscoveredProjects();
   await refreshOnboardingStatus();
   updateUI();
@@ -290,7 +353,7 @@ async function refreshAll() {
 async function refreshOnboardingStatus() {
   const request = ++onboardingRequest;
   const project = selectedProjectPath;
-  const result = await window.__TAURI__.core.invoke('get_onboarding_status', {
+  const result = await window.CreatorRuntime.invoke('get_onboarding_status', {
     unityProjectPath: project || null
   });
   if (request !== onboardingRequest || project !== selectedProjectPath) return;
@@ -425,7 +488,7 @@ async function runQuickSetup() {
   elements.setupMessage.textContent = 'Installing bridge and configuring clients...';
 
   try {
-    await window.__TAURI__.core.invoke('one_click_setup', {
+    await window.CreatorRuntime.invoke('one_click_setup', {
       unityProjectPath: selectedProjectPath,
       configureCodex: elements.connectCodex.checked,
       configureClaude: elements.connectClaude.checked,
@@ -484,14 +547,19 @@ function renderProjects() {
     onOperation(card.querySelector('.project-select'), 'click', () => selectChannel(channel.id));
     onOperation(card.querySelector('.remove-project'), 'click', () => removeChannel(channel.id));
     elements.projectsList.appendChild(card);
-    updateBridgeBadge(channel, card.querySelector('.bridge-badge'));
-    updateSdkBadge(channel, card.querySelector('.sdk-badge'));
+    if (window.CreatorRuntime.hosted) {
+      card.querySelector('.bridge-badge').textContent = 'Bridge not checked';
+      card.querySelector('.sdk-badge').textContent = 'SDK not checked';
+    } else {
+      updateBridgeBadge(channel, card.querySelector('.bridge-badge'));
+      updateSdkBadge(channel, card.querySelector('.sdk-badge'));
+    }
   });
 }
 
 async function updateSdkBadge(channel, badge) {
   try {
-    const profile = await window.__TAURI__.core.invoke('get_project_sdk_profile', {
+    const profile = await window.CreatorRuntime.invoke('get_project_sdk_profile', {
       unityProjectPath: channel.unity_project_path
     });
     badge.textContent = profile.label;
@@ -513,7 +581,7 @@ async function updateSdkBadge(channel, badge) {
 
 async function updateBridgeBadge(channel, badge) {
   try {
-    const status = await window.__TAURI__.core.invoke('get_unity_extension_status', {
+    const status = await window.CreatorRuntime.invoke('get_unity_extension_status', {
       unityProjectPath: channel.unity_project_path
     });
     if (status.current) {
@@ -532,7 +600,7 @@ async function updateBridgeBadge(channel, badge) {
 async function updateConfiguredBridges() {
   elements.updateBridgesBtn.disabled = true;
   try {
-    const summary = await window.__TAURI__.core.invoke('update_configured_unity_extensions');
+    const summary = await window.CreatorRuntime.invoke('update_configured_unity_extensions');
     await refreshAll();
     if (summary.failed.length) {
       showToast('Updated ' + summary.updated + ' bridges; ' + summary.failed.length + ' failed', 'error');
@@ -555,7 +623,7 @@ async function selectChannel(channelId) {
     selectedProjectPath = channel.unity_project_path;
     elements.projectPath.value = selectedProjectPath;
   }
-  await window.__TAURI__.core.invoke('save_config', { config: config });
+  await window.CreatorRuntime.invoke('save_config', { config: config });
   if (elements.autoConfig.checked && channel) await updateConfiguredClients(channel);
   await refreshAll();
 }
@@ -565,7 +633,7 @@ async function removeChannel(channelId) {
   if (config.active_channel_id === channelId) {
     config.active_channel_id = config.channels[0]?.id || null;
   }
-  await window.__TAURI__.core.invoke('save_config', { config: config });
+  await window.CreatorRuntime.invoke('save_config', { config: config });
   const active = getActiveChannel();
   selectedProjectPath = active?.unity_project_path || '';
   elements.projectPath.value = selectedProjectPath;
@@ -594,7 +662,7 @@ async function updateConfiguredClients(channel) {
 }
 
 async function updateCodexConfig(channel) {
-  await window.__TAURI__.core.invoke('update_codex_mcp_config', {
+  await window.CreatorRuntime.invoke('update_codex_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
     toolGroups: config.tool_groups || 'core'
@@ -602,7 +670,7 @@ async function updateCodexConfig(channel) {
 }
 
 async function updateClaudeConfig(channel) {
-  await window.__TAURI__.core.invoke('update_claude_mcp_config', {
+  await window.CreatorRuntime.invoke('update_claude_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
     toolGroups: config.tool_groups || 'core'
@@ -610,7 +678,7 @@ async function updateClaudeConfig(channel) {
 }
 
 async function updateAntigravityConfig(channel) {
-  await window.__TAURI__.core.invoke('update_antigravity_mcp_config', {
+  await window.CreatorRuntime.invoke('update_antigravity_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
     toolGroups: config.tool_groups || 'core'
@@ -618,7 +686,7 @@ async function updateAntigravityConfig(channel) {
 }
 
 async function updateOpenCodeConfig(channel) {
-  await window.__TAURI__.core.invoke('update_opencode_mcp_config', {
+  await window.CreatorRuntime.invoke('update_opencode_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
     toolGroups: config.tool_groups || 'core'
@@ -653,7 +721,7 @@ async function applyToClaudeCode() {
 
 async function disconnectFromCodex() {
   try {
-    await window.__TAURI__.core.invoke('remove_codex_mcp_config');
+    await window.CreatorRuntime.invoke('remove_codex_mcp_config');
     await refreshOnboardingStatus();
     updateSetupStatus();
     showToast('Codex disconnected', 'success');
@@ -664,7 +732,7 @@ async function disconnectFromCodex() {
 
 async function disconnectFromClaude() {
   try {
-    await window.__TAURI__.core.invoke('remove_claude_mcp_config');
+    await window.CreatorRuntime.invoke('remove_claude_mcp_config');
     await refreshOnboardingStatus();
     updateSetupStatus();
     showToast('Claude Code disconnected', 'success');
@@ -701,7 +769,7 @@ async function applyToOpenCode() {
 
 async function disconnectFromAntigravity() {
   try {
-    await window.__TAURI__.core.invoke('remove_antigravity_mcp_config');
+    await window.CreatorRuntime.invoke('remove_antigravity_mcp_config');
     await refreshOnboardingStatus();
     updateSetupStatus();
     showToast('Antigravity disconnected', 'success');
@@ -712,7 +780,7 @@ async function disconnectFromAntigravity() {
 
 async function disconnectFromOpenCode() {
   try {
-    await window.__TAURI__.core.invoke('remove_opencode_mcp_config');
+    await window.CreatorRuntime.invoke('remove_opencode_mcp_config');
     await refreshOnboardingStatus();
     updateSetupStatus();
     showToast('OpenCode disconnected', 'success');
@@ -725,7 +793,7 @@ async function installExtension() {
   const channel = getActiveChannel();
   if (!channel) return showToast('No Unity project selected', 'error');
   try {
-    await window.__TAURI__.core.invoke('install_unity_extension', {
+    await window.CreatorRuntime.invoke('install_unity_extension', {
       unityProjectPath: channel.unity_project_path
     });
     await refreshOnboardingStatus();
@@ -738,7 +806,7 @@ async function installExtension() {
 
 async function saveLauncherConfig(errorMessage) {
   try {
-    await window.__TAURI__.core.invoke('save_config', { config: config });
+    await window.CreatorRuntime.invoke('save_config', { config: config });
     return true;
   } catch (error) {
     showToast(errorMessage + ': ' + String(error), 'error');
@@ -748,7 +816,7 @@ async function saveLauncherConfig(errorMessage) {
 
 async function openDocumentation() {
   try {
-    await window.__TAURI__.shell.open('https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP');
+    await window.CreatorRuntime.openExternal('https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP');
   } catch (error) {
     showToast('Could not open documentation', 'error');
   }
@@ -778,7 +846,7 @@ async function refreshFeedbackSettings() {
   elements.usageCheckIns.checked = false;
   try {
     if (!project) { elements.feedbackStatus.textContent = 'Select a Unity project. Local only; nothing is uploaded.'; return; }
-    const settings = await window.__TAURI__.core.invoke('get_project_feedback_settings', { unityProjectPath: project });
+    const settings = await window.CreatorRuntime.invoke('get_project_feedback_settings', { unityProjectPath: project });
     if (request !== feedbackRequest || project !== selectedProjectPath) return;
     elements.localFeedback.checked = settings.enabled;
     elements.localFeedback.disabled = false;
@@ -798,7 +866,7 @@ async function saveFeedbackSettings() {
   elements.localFeedback.disabled = true;
   elements.usageCheckIns.disabled = true;
   try {
-    await window.__TAURI__.core.invoke('set_project_feedback_settings', { unityProjectPath: project, enabled, usageCheckIns });
+    await window.CreatorRuntime.invoke('set_project_feedback_settings', { unityProjectPath: project, enabled, usageCheckIns });
   } catch (error) { showToast('Feedback preference was not saved: ' + String(error), 'error'); }
   await refreshFeedbackSettings();
 }

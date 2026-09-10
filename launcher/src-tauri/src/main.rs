@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod feedback;
+mod hosted;
 mod hub;
 mod jsonc;
 mod lifecycle;
@@ -2057,6 +2058,13 @@ fn finish_ui_operation(id: u32) -> Result<(), &'static str> {
 fn main() {
     if let Some(code) = hub::handle_entry(&env::args_os().skip(1).collect::<Vec<_>>()) {
         std::process::exit(code);
+    }
+    if hub::entry_mode(&env::args_os().skip(1).collect::<Vec<_>>()) == hub::EntryMode::PreviewHost {
+        if let Err(error) = hosted::run() {
+            eprintln!("Hosted MCP stopped: {error}");
+            std::process::exit(1);
+        }
+        return;
     }
 
     // Linux-only: work around WebKitGTK failures on Wayland sessions and

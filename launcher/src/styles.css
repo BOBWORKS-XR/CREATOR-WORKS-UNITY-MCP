@@ -1072,6 +1072,24 @@ h2 {
   }
 }
 
+.creator-hosted .header, .creator-hosted .footer { display: none; }
+.creator-hosted .main { padding-top: 16px; }
+.hosted-preview:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #293137;
+}
+.hosted-preview > div:first-child { flex: 1 1 240px; min-width: 0; }
+.hosted-preview strong { font-size: 15px; }
+.hosted-preview p { margin: 6px 0 0; color: #9ba7af; overflow-wrap: anywhere; }
+.hosted-preview-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.hosted-preview output { flex-basis: 100%; overflow-wrap: anywhere; color: #9ba7af; }
+.hosted-preview output:empty { display: none; }
+
 @media (prefers-reduced-motion: reduce) {
   .app-shell, .app-scrim, .app-menu, .app-drawer-title, .app-shell.expanded .app-menu, .app-shell.expanded .app-drawer-title, .brand-lockup, .header.drawer-open .brand-lockup { transition: none; transform: none; }
   .setup-button.working svg { animation: none; }

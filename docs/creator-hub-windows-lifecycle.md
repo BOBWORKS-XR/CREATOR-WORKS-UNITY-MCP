@@ -4,6 +4,32 @@ Unreleased MCP branch: `feature/creator-hub-compatibility`, version
 `2.7.0-alpha.1`. This follow-up does not update installed MCPs, client configs
 or Unity projects. Hub and Project Setup remain independent applications.
 
+## Hosting Correction
+
+The approved Hub product is **one window hosting the real installed apps**.
+Tools retain independent files/settings and standalone fallback, but no separate
+visible app window when hosted. This document describes package identity and
+close protection, not an embedding mechanism or hosting compatibility proof.
+See the [Setup-first hosting plan](creator-hub-compatibility.md#required-product-direction).
+
+Hub setup asks **Update and add to Hub** for detected apps. Only approved apps
+receive necessary compatibility updates/adoption. Compatible apps need no
+reinstall but still require adoption consent. No apps found or Not now means
+Hub-only installation, with existing files/settings/shortcuts/processes unchanged
+and no missing companion installed automatically. Later adoption stays available.
+Failed/cancelled updates never complete adoption, hide a standalone interface
+or reroute its shortcut.
+
+WM_CLOSE alone does not retain selection, forms or results. Do not use it as a
+substitute for idle state-preserving handoff, or hide/close an app before the
+hosted view is ready. Shortcut routing follows verified compatible adoption;
+unsupported/failed Hub handoff must leave standalone access intact. The shared
+native hosting contract is now applied in MCP's
+[read-only preview](creator-hub-hosted-preview.md), without duplicating its UI
+or disturbing client-owned stdio servers. Actual Hub/MCP acceptance and adoption
+remain separate gates; the window-property protocol below does not cover the
+no-window hosted backend. Hub owns the full native response-wait operation lease.
+
 ## Verified Public Package
 
 Read-only inspection on 2026-09-10 downloaded the existing public
@@ -131,6 +157,11 @@ Window messages are still subject to Windows privilege and session rules.
 - Single-instance, concurrent cold starts, existing-window focus and reopening
   after an update remain separate work. `lifecycleProtocol: 1` promises none of
   these, and `launch.singleInstance` is not advertised.
+- Hosting readiness, shortcut adoption, one visible Hub window and retention
+  of selection/forms/results are required acceptance gates, not optional later
+  features. Close protocol 1 advertises none of them. Test busy switching,
+  backend failure, offline use, Hub removal and standalone fallback without
+  resetting setup or reconnecting healthy clients.
 - Never force-close Unity, AI clients, or a busy MCP launcher; never auto-install
   or rewrite project/client configuration just to make Hub adoption succeed.
 
@@ -179,3 +210,6 @@ merge main, tag a release, install the app or update client configurations.
 Native installer install/update/restart acceptance still needs an isolated
 Windows VM or an explicitly approved test installation. No transactional
 rollback, full server/project quiescence or single-instance proof is implied.
+Do not advertise hosting readiness in descriptors until the agreed shared
+contract and one-window acceptance are verified in that exact artifact. The
+current standalone-launch preview does not meet this product requirement.
