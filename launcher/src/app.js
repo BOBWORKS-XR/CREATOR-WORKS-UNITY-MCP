@@ -17,6 +17,8 @@ let releaseUrl = null;
 let feedbackRequest = 0;
 let onboardingRequest = 0;
 let operationActive = false;
+let pendingBadges = [];
+let badgeWorkerActive = false;
 
 const elements = {};
 
@@ -40,11 +42,24 @@ document.addEventListener('DOMContentLoaded', async function() {
 
   try { await window.CreatorRuntime.ready; }
   catch (error) { showToast(String(error), 'error'); return; }
-  if (window.CreatorRuntime.hosted) {
+  if (window.CreatorRuntime.hosted && window.CreatorRuntime.readOnly) {
     await initializeHostedPreview();
     return;
   }
   setupEventListeners();
+  if (window.CreatorRuntime.hosted) {
+    await window.CreatorRuntime.listen('creator-runtime-disconnected', ({ payload }) => {
+      elements.workspaceControls.disabled = true;
+      clearTimeout(projectStatusTimer);
+      clearTimeout(updateTimer);
+      pendingBadges = [];
+      document.getElementById('hostedPreview').hidden = false;
+      document.getElementById('hostedPreviewStatus').textContent = payload;
+      document.getElementById('hostedPreview').querySelector('strong').textContent = 'MCP disconnected';
+      document.getElementById('hostedRefresh').disabled = true;
+      document.getElementById('hostedBrowse').disabled = true;
+    });
+  }
   window.CreatorRuntime.listen('creator-lifecycle-close-blocked', () => {
     showToast('Finish the current operation before closing Creator Works MCP.', 'error');
   }).catch(error => console.error('Close notification unavailable:', error));
@@ -126,7 +141,7 @@ async function initializeHostedPreview() {
 // An ancestor fieldset locks even freshly rendered controls without overwriting
 // their own disabled states (for example unavailable feedback or setup).
 async function runUIOperation(action) {
-  if (operationActive) return;
+  if (operationActive || window.CreatorRuntime.disconnected) return;
   operationActive = true;
   elements.workspaceControls.disabled = true;
   elements.workspaceControls.setAttribute('aria-busy', 'true');
@@ -145,7 +160,7 @@ async function runUIOperation(action) {
       }
     }
     operationActive = false;
-    elements.workspaceControls.disabled = false;
+    elements.workspaceControls.disabled = Boolean(window.CreatorRuntime.disconnected);
     elements.workspaceControls.removeAttribute('aria-busy');
     updateSetupButton();
   }
@@ -524,6 +539,7 @@ async function waitForFreshBridge(maxSeconds) {
 }
 
 function renderProjects() {
+  pendingBadges = [];
   elements.projectsList.querySelectorAll('.project-card').forEach(function(card) { card.remove(); });
   elements.emptyState.style.display = config.channels.length ? 'none' : 'flex';
 
@@ -547,14 +563,27 @@ function renderProjects() {
     onOperation(card.querySelector('.project-select'), 'click', () => selectChannel(channel.id));
     onOperation(card.querySelector('.remove-project'), 'click', () => removeChannel(channel.id));
     elements.projectsList.appendChild(card);
-    if (window.CreatorRuntime.hosted) {
+    if (window.CreatorRuntime.hosted && window.CreatorRuntime.readOnly) {
       card.querySelector('.bridge-badge').textContent = 'Bridge not checked';
       card.querySelector('.sdk-badge').textContent = 'SDK not checked';
     } else {
-      updateBridgeBadge(channel, card.querySelector('.bridge-badge'));
-      updateSdkBadge(channel, card.querySelector('.sdk-badge'));
+      pendingBadges.push({ channel, card });
     }
   });
+  void refreshProjectBadges();
+}
+
+async function refreshProjectBadges() {
+  if (badgeWorkerActive) return;
+  badgeWorkerActive = true;
+  try {
+    while (pendingBadges.length && !window.CreatorRuntime.disconnected) {
+      const { channel, card } = pendingBadges.shift();
+      if (!card.isConnected) continue;
+      await updateBridgeBadge(channel, card.querySelector('.bridge-badge'));
+      if (card.isConnected) await updateSdkBadge(channel, card.querySelector('.sdk-badge'));
+    }
+  } finally { badgeWorkerActive = false; }
 }
 
 async function updateSdkBadge(channel, badge) {
@@ -886,9 +915,10 @@ async function checkForUpdates() {
   releaseUrl = null;
   elements.updateStatus.textContent = 'Checking GitHub...';
   try {
-    const { checkStableUpdate } = await import('./updates.js');
     const version = document.getElementById('appVersion').textContent.trim();
-    const result = await checkStableUpdate(version);
+    const result = window.CreatorRuntime.hosted
+      ? window.CreatorUpdates.stableUpdate(version, await window.CreatorRuntime.invoke('get_stable_release'))
+      : await window.CreatorUpdates.checkStableUpdate(version);
     if (result.available) {
       releaseUrl = result.url;
       elements.openReleaseBtn.hidden = false;

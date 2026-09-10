@@ -77,17 +77,21 @@ test("NSIS setup guards the bundled runtime without force-closing clients", () =
     /"installerHooks": "\.\/windows\/installer-hooks\.nsh"/
   );
   assert.match(installerHooks, /NSIS_HOOK_PREINSTALL/);
-  assert.match(installerHooks, /server\\runtime\\node\.exe/);
-  assert.match(installerHooks, /Get-CimInstance Win32_Process/);
-  assert.match(installerHooks, /-ErrorAction Stop/);
-  assert.match(installerHooks, /catch \{ exit 11 \}/);
-  assert.match(installerHooks, /ExecutablePath/);
-  assert.match(installerHooks, /OrdinalIgnoreCase/);
+  const guard = fs.readFileSync(path.join(root, 'launcher/src-tauri/windows/installer-preflight.ps1'), 'utf8');
+  assert.match(installerHooks, /MUI_CUSTOMFUNCTION_GUIINIT CreatorMcpPreflight/);
+  assert.match(installerHooks, /-File "\$PLUGINSDIR\\creator-mcp-preflight\.ps1" -InstallDir "\$3\\\."/);
+  assert.doesNotMatch(installerHooks, /^\s*nsExec::[^\r\n]*\s-Command\s/m);
+  assert.match(guard, /server\\runtime\\node\.exe/);
+  assert.match(guard, /Get-CimInstance Win32_Process/);
+  assert.match(guard, /-OperationTimeoutSec 8 -ErrorAction Stop/);
+  assert.match(guard, /ExecutablePath/);
+  assert.match(guard, /OrdinalIgnoreCase/);
+  assert.match(guard, /FileShare\]::None/);
   assert.match(installerHooks, /MB_RETRYCANCEL/);
-  assert.match(installerHooks, /IfSilent creator_works_mcp_runtime_silent_abort/);
+  assert.match(installerHooks, /IfSilent creator_preflight_cancel/);
   assert.match(installerHooks, /SetErrorLevel 10/);
   assert.doesNotMatch(
-    installerHooks,
+    installerHooks + guard,
     /\b(?:taskkill|Stop-Process|TerminateProcess)\b/i
   );
 });

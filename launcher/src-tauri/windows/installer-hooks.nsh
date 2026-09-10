@@ -1,54 +1,91 @@
-; Tauri's default macro kills the GUI in silent/passive mode. Replace it for
-; both this installer and its generated uninstaller. This cannot change an
-; already-installed legacy uninstaller; installerProtocol remains 0.
-!ifmacrondef CheckIfAppIsRunning
-  !error "Expected Tauri running-app macro is missing; review installer template"
+; -Command reparses trailing arguments and loses spaces in $INSTDIR. Use a
+; packaged script and -File; append \. so a trailing slash cannot escape a quote.
+!define CREATOR_PREFLIGHT_SCRIPT "${__FILEDIR__}\installer-preflight.ps1"
+ReserveFile "${CREATOR_PREFLIGHT_SCRIPT}"
+Var CreatorPreflightPassed
+
+; Modern UI calls this after .onInit restores $INSTDIR and before any page,
+; including Tauri's page that can invoke an already-installed uninstaller.
+!ifdef MUI_CUSTOMFUNCTION_GUIINIT
+  !error "Review existing GUI initialization before adding MCP preflight"
 !endif
-!macroundef CheckIfAppIsRunning
-!macro CheckIfAppIsRunning executableName productName
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "& { param([string]$$exe); try { $$name = [IO.Path]::GetFileNameWithoutExtension($$exe); $$running = @(Get-Process -ErrorAction Stop | Where-Object { $$_.ProcessName -eq $$name }); if ($$running.Count -gt 0) { exit 10 }; exit 0 } catch { exit 11 } }" "${executableName}"`
-  Pop $0
-  Pop $1
-  ${If} $0 != "0"
-    MessageBox MB_ICONSTOP|MB_OK \
-      "${productName} is running, or Setup could not verify that it is closed.$\r$\n$\r$\nFinish your work and close the app, then try again. Setup will not force-close it." /SD IDOK
-    SetErrorLevel 10
-    Abort
-  ${EndIf}
-!macroend
+!define MUI_CUSTOMFUNCTION_GUIINIT CreatorMcpPreflight
 
-!macro NSIS_HOOK_PREINSTALL
-creator_works_mcp_runtime_check:
+!macro CreatorDefinePreflight PREFIX
+Function ${PREFIX}CreatorMcpPreflight
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  StrCpy $CreatorPreflightPassed 0
+  ; Also check the prior current-user location if /D changes the destination.
+  ReadRegStr $2 HKCU "Software\Creator Works\Creator Works MCP" ""
+  StrCpy $3 $INSTDIR
+
+creator_preflight_retry:
+  InitPluginsDir
+  StrCpy $1 "Cannot prepare the bundled preflight script."
   ClearErrors
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "& { param([string]$$installDir); $$target = [IO.Path]::GetFullPath((Join-Path $$installDir 'server\runtime\node.exe')); try { $$running = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $$_.Name -eq 'node.exe' -and $$_.ExecutablePath -and [string]::Equals([IO.Path]::GetFullPath($$_.ExecutablePath), $$target, [StringComparison]::OrdinalIgnoreCase) }) } catch { exit 11 }; if ($$running.Count -gt 0) { exit 10 }; exit 0 }" "$INSTDIR"`
+  File /oname=$PLUGINSDIR\creator-mcp-preflight.ps1 "${CREATOR_PREFLIGHT_SCRIPT}"
+  IfErrors creator_preflight_unavailable
+  nsExec::ExecToStack /TIMEOUT=15000 `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\creator-mcp-preflight.ps1" -InstallDir "$3\."`
   Pop $0
   Pop $1
+  StrCmp $0 "0" creator_preflight_next
+  StrCmp $0 "10" creator_preflight_busy creator_preflight_unavailable
 
-  StrCmp $0 "0" creator_works_mcp_runtime_ready
-  StrCmp $0 "10" creator_works_mcp_runtime_locked
-
-  MessageBox MB_ICONSTOP|MB_OK \
-    "Setup could not check whether Creator Works MCP is still running.$\r$\n$\r$\nClose Codex, Claude Code, and Creator Works MCP, then run Setup again." /SD IDOK
-  SetErrorLevel 11
-  Abort
-
-creator_works_mcp_runtime_locked:
-  IfSilent creator_works_mcp_runtime_silent_abort creator_works_mcp_runtime_prompt
-
-creator_works_mcp_runtime_prompt:
+creator_preflight_busy:
+  IfSilent creator_preflight_cancel
   MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL \
-    "Creator Works MCP is currently running inside Codex or Claude Code.$\r$\n$\r$\nSave your work, fully close those applications, then click Retry. Setup will not force-close them." \
-    IDRETRY creator_works_mcp_runtime_check \
-    IDCANCEL creator_works_mcp_runtime_abort
+    "Creator Works MCP files are in use.$\r$\n$\r$\nSave your work and fully exit Creator Works MCP and AI clients using it: Codex, Claude Code, Antigravity, OpenCode, or another MCP client. Closing only the MCP launcher may leave its private runtime running.$\r$\n$\r$\nThen click Retry, or Cancel to stop Setup. No applications will be force-closed." /SD IDCANCEL \
+    IDRETRY creator_preflight_retry IDCANCEL creator_preflight_cancel
 
-creator_works_mcp_runtime_abort:
-  SetErrorLevel 10
-  Abort
+creator_preflight_unavailable:
+  IfSilent creator_preflight_cancel
+  MessageBox MB_ICONSTOP|MB_RETRYCANCEL \
+    "Setup could not verify access to Creator Works MCP files. Nothing further will be installed or removed.$\r$\n$\r$\nFully exit the MCP launcher and its AI clients (Codex, Claude Code, Antigravity, OpenCode, or others), then Retry. If this persists, Cancel and share the installer filename and Setup details with support. Do not choose Ignore on a file-write error.$\r$\n$\r$\nCheck result: $1" /SD IDCANCEL \
+    IDRETRY creator_preflight_retry IDCANCEL creator_preflight_cancel
 
-creator_works_mcp_runtime_silent_abort:
-  DetailPrint "Creator Works MCP runtime is in use; close MCP clients before upgrading."
+creator_preflight_cancel:
+  DetailPrint "MCP preflight blocked Setup; no application was force-closed."
   SetErrorLevel 10
   Quit
 
-creator_works_mcp_runtime_ready:
+creator_preflight_next:
+  StrCmp $2 "" creator_preflight_ready
+  StrCmp $2 $3 creator_preflight_ready
+  StrCpy $3 $2
+  StrCpy $2 ""
+  Goto creator_preflight_retry
+creator_preflight_ready:
+  StrCpy $CreatorPreflightPassed 1
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+!macroend
+!insertmacro CreatorDefinePreflight ""
+!insertmacro CreatorDefinePreflight "un."
+
+!macro NSIS_HOOK_PREINSTALL
+  Call CreatorMcpPreflight
+!macroend
+!macro NSIS_HOOK_PREUNINSTALL
+  Call un.CreatorMcpPreflight
+!macroend
+
+; These template calls immediately follow our preinstall/preuninstall hooks.
+; Consume the successful guard instead of Tauri's default silent GUI force-kill.
+; A legacy uninstaller already on disk remains outside this replacement.
+!ifmacrondef CheckIfAppIsRunning
+  !error "Expected Tauri running-app macro missing; review installer template"
+!endif
+!macroundef CheckIfAppIsRunning
+!macro CheckIfAppIsRunning executableName productName
+  ${If} $CreatorPreflightPassed != 1
+    SetErrorLevel 11
+    Abort "MCP preflight did not complete. No application will be force-closed."
+  ${EndIf}
+  StrCpy $CreatorPreflightPassed 0
 !macroend

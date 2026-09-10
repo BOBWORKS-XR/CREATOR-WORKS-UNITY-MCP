@@ -13,7 +13,7 @@ actual installed app interfaces, not a manager that opens independent GUI
 windows.** Hosting is required for the first Hub experience, not an optional
 later enhancement. The existing identity, styling, packaging and close-guard
 work is groundwork only. The branch now adds a bounded
-[read-only hosted adapter](creator-hub-hosted-preview.md), not full hosting or
+[hosted adapter with a separately authorized writable candidate](creator-hub-hosted-preview.md), not full hosting or
 adoption readiness. The actual Hub/MCP binary pair still requires acceptance.
 
 - During Hub setup, detect existing Creator apps and ask **Update and add to
@@ -64,7 +64,9 @@ adoption readiness. The actual Hub/MCP binary pair still requires acceptance.
    restoration. Test busy switching, backend failure, upgrades, Hub removal,
    cancelled updates and later adoption without forced shutdown or duplicates.
 
-The preview is development-only, with no installer, adoption or bridge update.
+The preview is development-only, with no installer or adoption. Read-only remains
+the default; the separately paired writable candidate includes explicit bridge
+operations and still needs native acceptance.
 The [shared plan](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md)
 is owned by the Hub/Setup task; MCP owns only its runtime/backend adapter.
 

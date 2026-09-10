@@ -5,7 +5,10 @@ mod feedback;
 #[cfg(windows)]
 mod gui_owner;
 mod hosted;
+mod hosted_commands;
+mod hosted_journal;
 mod hosted_lifecycle;
+mod hosted_payload;
 mod hub;
 mod jsonc;
 mod lifecycle;
@@ -355,6 +358,9 @@ fn sync_ephemeral_bundle(source_root: &Path) -> Option<PathBuf> {
 }
 
 fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if let Some(root) = app.try_state::<hosted_payload::Root>() {
+        return Ok(root.0.clone());
+    }
     if let Some((variable, configured_root)) = std::env::var_os(MCP_ROOT_ENV)
         .map(|value| (MCP_ROOT_ENV, value))
         .or_else(|| std::env::var_os(LEGACY_MCP_ROOT_ENV).map(|value| (LEGACY_MCP_ROOT_ENV, value)))

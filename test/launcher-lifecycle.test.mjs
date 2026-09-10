@@ -37,8 +37,12 @@ test('new installer and uninstaller replace the force-kill macro with refusal', 
   const hook = fs.readFileSync('launcher/src-tauri/windows/installer-hooks.nsh', 'utf8');
   assert.match(hook, /!macroundef CheckIfAppIsRunning/);
   assert.match(hook, /!macro CheckIfAppIsRunning executableName productName/);
-  assert.match(hook, /Get-Process -ErrorAction Stop/);
-  assert.match(hook, /will not force-close it/);
-  assert.match(hook, /installerProtocol remains 0/);
-  assert.doesNotMatch(hook, /KillProcess|Stop-Process|taskkill|TerminateProcess/);
+  const guard = fs.readFileSync('launcher/src-tauri/windows/installer-preflight.ps1', 'utf8');
+  assert.match(hook, /MUI_CUSTOMFUNCTION_GUIINIT CreatorMcpPreflight/);
+  assert.match(hook, /NSIS_HOOK_PREUNINSTALL/);
+  assert.match(hook, /Call un\.CreatorMcpPreflight/);
+  assert.match(hook, /\$CreatorPreflightPassed != 1/);
+  assert.match(guard, /Get-CimInstance Win32_Process/);
+  assert.match(hook, /No applications will be force-closed/);
+  assert.doesNotMatch(hook + guard, /KillProcess|Stop-Process|taskkill|TerminateProcess/);
 });

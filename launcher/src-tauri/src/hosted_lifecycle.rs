@@ -1,5 +1,5 @@
-//! Native session bookkeeping. Writable construction is deliberately test-only
-//! until verified host identity, GUI ownership and Hub enforcement are joined.
+//! Native session bookkeeping. Writable construction requires session permission
+//! and exclusive GUI ownership in the inherited-pipe adapter.
 use crate::lifecycle::{CommandGuard, Lifecycle};
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -35,6 +35,15 @@ pub struct HostedSession<'a> {
 }
 
 impl<'a> HostedSession<'a> {
+    pub fn writable(lifecycle: &'a Lifecycle, session: &str) -> Result<Self, &'static str> {
+        let mut state = Self::read_only(lifecycle, session)?;
+        state.allow_workflows = true;
+        Ok(state)
+    }
+
+    pub fn has_workflow(&self) -> bool {
+        self.workflow.is_some()
+    }
     pub fn read_only(lifecycle: &'a Lifecycle, session: &str) -> Result<Self, &'static str> {
         if session.len() != 64 || !session.bytes().all(|c| c.is_ascii_hexdigit()) {
             return Err("Invalid native hosted session identity");

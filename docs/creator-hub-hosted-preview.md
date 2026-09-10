@@ -2,9 +2,9 @@
 
 Unreleased Windows x64 development slice on `feature/creator-hub-compatibility`,
 version `2.7.0-alpha.1`. Not an installer or a production Hub capability.
-The Hub/Setup owner owns host verification, iframe isolation, app routing and
-adoption. MCP implements its own read-only adapter, preserving the suite's
-preview v1 contract, with an optional revision-2 lifecycle preparation below.
+Hub owns host verification, iframe isolation, app routing and adoption. MCP
+preserves the read-only preview v1 contract and adds a separately authorized
+revision-2 writable candidate below. Native writable acceptance is pending.
 The independent Node MCP server protocol is unchanged.
 
 ## What Is Implemented
@@ -15,13 +15,15 @@ The independent Node MCP server protocol is unchanged.
   protocol 1, with one transferred MessagePort. Frame presence alone does not
   hide chrome or authorize native operations. This is a transport handshake,
   not publisher authentication; the native host boundary remains essential.
-- The real launcher UI appears with its configuration controls disabled.
+- In read-only mode the real launcher UI appears with its configuration controls disabled.
   It reads saved settings, marks SDK/client/bridge state **Not checked**, and
   offers a refresh and native folder picker. Picking a folder does not add or
   change a project. Host navigation must preserve this frame rather than reload it.
-- No normal startup, migration, project scan, update fetch, client configuration,
+- In read-only mode no normal startup, migration, project scan, update fetch, client configuration,
   Unity operation, bridge update, installation or shortcut change runs in preview.
-- Requests serialize, with at most 16 pending and a 60,000-byte frontend limit.
+- Requests serialize, with at most 16 pending plus one reserved workflow-finish
+  slot and a 60,000-byte frontend limit. Project badge reads are bounded rather
+  than enqueueing every project at once.
   Disconnect rejects pending requests and locks the preview. Commands are never
   retried automatically; a lost response does not mean successful cancellation.
 
@@ -56,7 +58,7 @@ backend events and preserves that exact reply shape.
 | --- | --- | --- |
 | `get_hosted_snapshot` | `{}` | `config` or null, `source`, `readOnly: true`, `resourceDir`. Existing current config wins; legacy is read only if current is absent. No migration/repair/default file. |
 | `pick_project_folder` | `{}` | Native selected folder string or null. No persistent setting or filesystem write. |
-| `open_official_url` | `{url}` | Opens only one of four exact public Creator Works GitHub links compiled into the backend. No arbitrary URL/file/executable. |
+| `open_official_url` | `{url}` | Opens fixed official links or exact official MCP stable release tag pages. No arbitrary URL/file/executable. |
 
 Saved configuration reads are capped at 256 KiB and 256 projects. Invalid,
 unreadable or oversized current data fails visibly, rather than falling back
@@ -73,8 +75,8 @@ this read-only pipe allowlist.
 
 Explicit initialization args `{hostingRevision: 2, requestedMode: "read-only"}`
 add `hostingRevision: 2` and `effectiveMode: "read-only"` to the initialize reply.
-`writable`, unknown revisions/modes and extra args are refused before consent or
-dispatch. This source preparation is not an advertised production capability;
+Unknown revisions/modes and extra args are refused before consent or dispatch.
+Writable mode requires the additional checks below. This is not an advertised production capability;
 the immutable older preview artifact remains unchanged.
 
 Only that negotiated mode emits native frames named `creator-mcp-lifecycle`:
@@ -96,8 +98,9 @@ the already-accepted synchronous request, then releases only its owned workflow.
 Its last 16 in-memory records distinguish a returned Rust `Result::Ok` from an
 error or unwound handler. They do not establish success of nested/asynchronous
 operations and are **not durable crash recovery or a full result handoff**.
-Writable session construction exists only in tests; no production mutable
-allowlist or writable initializer has been enabled.
+The writable candidate adds a separate bounded persistent journal for operations
+that can change settings. These records still describe handler return, not the
+success of nested operations or Unity runtime acceptance.
 
 Compatible standalone Windows GUIs reserve an exclusive `launcher-gui.lock`
 handle in the current user's settings directory before building the writable
@@ -109,8 +112,39 @@ Older launchers lacking this lock are explicitly outside that guarantee.
 Hub must reserve its own workflow guard **before** forwarding begin, hold it
 across native replies and command gaps, and never unlock solely from a child
 idle event. Signed descriptor revision/modes, verified host identity, explicit
-consent, legacy-GUI handling, durable outcomes and acknowledged form/result
-transfer remain required before full writable adoption can be enabled.
+consent and acknowledged form/result transfer remain required before full
+installed-app adoption can be enabled. Legacy GUIs that do not cooperate with
+ownership locks remain outside the exclusive-ownership guarantee.
+
+## Writable Candidate
+
+Only an explicitly paired Hub build requests `{hostingRevision: 2,
+requestedMode: "writable"}`. Native MCP consent identifies the actual parent
+image by path and SHA-256 and describes settings/client/bridge authority. Its
+image handle remains locked throughout the session. A fingerprint is not a
+publisher signature or persistent adoption. Declining retains standalone access.
+
+The backend then verifies and locks its own compiled-in server, private Node,
+bridge and logo hashes and acquires the current-user GUI ownership lock. Hosted
+resource resolution cannot fall back to a development checkout or old bundle.
+The same app handlers implement setup, project selection, client configuration,
+bridge updates and optional feedback. Mutating/migrating calls require a native
+workflow; only its session can finish it. Normal startup can migrate launcher
+settings, as it does in standalone mode. Read-only initialization never does.
+
+Hub reserves its operation guard before begin and retains it through replies,
+workflow gaps and transport failure until the real backend exits. Child idle
+events cannot release it. The frontend locks on disconnect and never replays a
+command. The local `hosted-operation-outcomes.json` retains at most 32 command
+identities/outcomes, without arguments, results or credentials. Accepted writes
+are recorded before dispatch and returned outcomes before replies. An incomplete
+record requires an explicit warning acknowledgement at the next writable start;
+acknowledgement does not label the prior action successful or roll it back.
+
+Update metadata comes from Hub's fixed, bounded official stable-release request.
+The sandbox retains `connect-src 'none'`, no Tauri globals, and no installer
+authority. Read-only mode cannot use the added commands. Ordinary standalone
+updates and public links remain available without Hub.
 
 ## Verification And Remaining Gates
 
@@ -133,9 +167,8 @@ prove the actual Hub/MCP process pair. Hub must add the exact tested MCP hash an
 native command/session routing, then verify native consent, snapshot/resource
 ownership, picker, busy close refusal and clean idle shutdown.
 
-Still outside this slice: configuration mutations, ordinary setup, update
-checks inside the network-isolated iframe, full asset/module routing, broad
-adversarial native iframe tests, crash recovery, single-instance routing,
+Still outside verified acceptance: real writable native workflow tests, broad
+adversarial native iframe tests, full crash recovery, single-instance routing,
 live standalone state transfer, adoption/shortcut changes, server quiescence,
 silent update guarantees and macOS/Linux hosting. Do not label this ready for
 general Hub use or publish a production hosting descriptor yet.

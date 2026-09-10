@@ -1,4 +1,4 @@
-//! Read-only MCP adapter for the suite's preview v1 inherited-pipe protocol.
+//! Session-authorized MCP adapter for the suite's inherited-pipe preview protocol.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -27,6 +27,26 @@ const OFFICIAL_URLS: &[&str] = &[
     "https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md",
 ];
 
+fn official_url(url: &str) -> bool {
+    if OFFICIAL_URLS.contains(&url) {
+        return true;
+    }
+    let Some(tag) =
+        url.strip_prefix("https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/")
+    else {
+        return false;
+    };
+    let version = tag.strip_prefix('v').unwrap_or(tag);
+    let parts: Vec<_> = version.split('.').collect();
+    version.len() <= 80
+        && parts.len() == 3
+        && parts.iter().all(|part| {
+            !part.is_empty()
+                && part.bytes().all(|c| c.is_ascii_digit())
+                && (part.len() == 1 || !part.starts_with('0'))
+        })
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
@@ -54,6 +74,26 @@ struct WorkflowArgs {
 #[serde(deny_unknown_fields)]
 struct UrlArgs {
     url: String,
+}
+
+struct Permission {
+    writable: bool,
+    journal: Option<crate::hosted_journal::Journal>,
+    #[cfg(windows)]
+    _owner: Option<crate::gui_owner::GuiWriteOwner>,
+    _payload: Vec<std::fs::File>,
+}
+
+impl Permission {
+    fn read_only() -> Self {
+        Self {
+            writable: false,
+            journal: None,
+            #[cfg(windows)]
+            _owner: None,
+            _payload: Vec::new(),
+        }
+    }
 }
 
 fn decode<T: serde::de::DeserializeOwned>(args: Value) -> Result<T, String> {
@@ -194,7 +234,7 @@ fn dispatch(app: &tauri::AppHandle, command: &str, args: Value) -> Result<Value,
         }
         "open_official_url" => {
             let url = decode::<UrlArgs>(args)?.url;
-            if !OFFICIAL_URLS.contains(&url.as_str()) {
+            if !official_url(&url) {
                 return Err("Only fixed official Creator Works links are allowed.".into());
             }
             // Keep the same shell plugin used by standalone; do not add another opener dependency.
@@ -204,52 +244,84 @@ fn dispatch(app: &tauri::AppHandle, command: &str, args: Value) -> Result<Value,
                 .map_err(|_| "Cannot open official page.")?;
             Ok(Value::Null)
         }
-        _ => Err("Unsupported hosted MCP command. This preview is read-only.".into()),
+        _ => crate::hosted_commands::dispatch(app, command, args),
     }
 }
 
+#[cfg(test)]
 fn serve(
     input: &mut impl BufRead,
     output: &mut impl Write,
     files: BTreeMap<String, String>,
     approve: impl FnOnce() -> bool,
+    call: impl FnMut(&str, Value) -> Result<Value, String>,
+) -> Result<(), String> {
+    serve_authorized(
+        input,
+        output,
+        files,
+        |writable| {
+            if writable {
+                return Err("Writable hosting was not authorized.".into());
+            }
+            if approve() {
+                Ok(Permission::read_only())
+            } else {
+                Err("Opening MCP in Hub was declined. Standalone MCP is unchanged.".into())
+            }
+        },
+        call,
+    )
+}
+
+fn serve_authorized(
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+    files: BTreeMap<String, String>,
+    approve: impl FnOnce(bool) -> Result<Permission, String>,
     mut call: impl FnMut(&str, Value) -> Result<Value, String>,
 ) -> Result<(), String> {
     let hello = read_request(input)?.ok_or("Host disconnected before initialization.")?;
     if hello.id != 0 || hello.command != "initialize" {
         return Err("Expected hosted initialization.".into());
     }
-    let lifecycle_events = if hello.args.as_object().is_some_and(|args| args.is_empty()) {
-        false
+    let (lifecycle_events, writable) = if hello.args.as_object().is_some_and(|args| args.is_empty())
+    {
+        (false, false)
     } else {
         let args = decode::<InitializeArgs>(hello.args)?;
-        if args.hosting_revision != 2 || args.requested_mode != "read-only" {
-            return Err(
-                "Only read-only hosting revision 2 is available; writable adoption is not enabled."
-                    .into(),
-            );
+        if args.hosting_revision != 2
+            || !["read-only", "writable"].contains(&args.requested_mode.as_str())
+        {
+            return Err("Unsupported hosting revision or mode.".into());
         }
-        true
+        (true, args.requested_mode == "writable")
     };
-    if !approve() {
-        send(
-            output,
-            &hello.session,
-            0,
-            Err("Opening MCP in Hub was declined. Standalone MCP is unchanged.".into()),
-        )?;
-        return Ok(());
-    }
+    let mut permission = match approve(writable) {
+        Ok(permission) if permission.writable == writable => permission,
+        Ok(_) => return Err("Hosting permission does not match the requested mode.".into()),
+        Err(error) => {
+            send(output, &hello.session, 0, Err(error))?;
+            return Ok(());
+        }
+    };
     let mut initialization = json!({"appId": "creator-works-mcp", "version": env!("CARGO_PKG_VERSION"), "protocol": 1, "files": files});
     if lifecycle_events {
         initialization["hostingRevision"] = json!(2);
-        initialization["effectiveMode"] = json!("read-only");
+        initialization["effectiveMode"] = json!(if writable { "writable" } else { "read-only" });
     }
     send(output, &hello.session, 0, Ok(initialization))?;
-    let mut native_session = crate::hosted_lifecycle::HostedSession::read_only(
-        &crate::lifecycle::LIFECYCLE,
-        &hello.session,
-    )?;
+    let mut native_session = if permission.writable {
+        crate::hosted_lifecycle::HostedSession::writable(
+            &crate::lifecycle::LIFECYCLE,
+            &hello.session,
+        )?
+    } else {
+        crate::hosted_lifecycle::HostedSession::read_only(
+            &crate::lifecycle::LIFECYCLE,
+            &hello.session,
+        )?
+    };
     if lifecycle_events {
         output
             .write_all(&native_session.event()?)
@@ -262,8 +334,21 @@ fn serve(
             return Err("Mismatched or replayed hosted request.".into());
         }
         previous_id = request.id;
-        if !COMMANDS.contains(&request.command.as_str()) {
+        if !(COMMANDS.contains(&request.command.as_str())
+            || writable && crate::hosted_commands::COMMANDS.contains(&request.command.as_str()))
+        {
             return Err("Unknown hosted MCP command.".into());
+        }
+        if crate::hosted_commands::needs_workflow(&request.command)
+            && !native_session.has_workflow()
+        {
+            send(
+                output,
+                &hello.session,
+                request.id,
+                Err("Start an owned UI workflow before changing MCP settings or projects.".into()),
+            )?;
+            continue;
         }
         native_session.begin_command(request.id, &request.command)?;
         if lifecycle_events {
@@ -272,13 +357,19 @@ fn serve(
                 .and_then(|_| output.flush())
                 .map_err(|_| "Host disconnected before dispatch; command was not invoked.")?;
         }
+        let changes = crate::hosted_commands::needs_workflow(&request.command);
+        if changes {
+            if let Some(journal) = &mut permission.journal {
+                journal.begin(&hello.session, request.id, &request.command)?;
+            }
+        }
         let result = match request.command.as_str() {
-            // These remain outside COMMANDS and cannot currently be invoked.
-            // Even if mistakenly listed, read-only sessions refuse workflow authority.
-            "begin_ui_operation" => native_session
-                .begin_workflow()
-                .map(|id| json!(id))
-                .map_err(String::from),
+            "begin_ui_operation" => decode::<NoArgs>(request.args).and_then(|_| {
+                native_session
+                    .begin_workflow()
+                    .map(|id| json!(id))
+                    .map_err(String::from)
+            }),
             "finish_ui_operation" => decode::<WorkflowArgs>(request.args).and_then(|args| {
                 native_session
                     .finish_workflow(args.id)
@@ -287,6 +378,11 @@ fn serve(
             }),
             _ => call(&request.command, request.args),
         };
+        if changes {
+            if let Some(journal) = &mut permission.journal {
+                journal.complete(&hello.session, request.id, result.is_ok())?;
+            }
+        }
         native_session.complete_command(result.is_ok())?;
         // Complete an accepted command before observing EOF; never replay after a lost reply.
         send(output, &hello.session, request.id, result)?;
@@ -385,6 +481,7 @@ fn parent_host() -> Result<String, String> {
 
 pub fn run() -> Result<(), String> {
     let host = parent_host()?;
+    let (host_image, host_hash) = crate::hosted_payload::lock_image(Path::new(&host))?;
     let mut context = tauri::generate_context!();
     let files = assets(&context)?;
     context.config_mut().app.windows.clear();
@@ -394,24 +491,124 @@ pub fn run() -> Result<(), String> {
         .setup(move |app| {
             let app = app.handle().clone();
             std::thread::spawn(move || {
-                let result = serve(&mut std::io::stdin().lock(), &mut std::io::stdout().lock(), files,
-                    || app.dialog().message(format!("Open MCP's read-only preview inside this Creator Hub window?\n\n{host}\n\nOnly continue if you just chose MCP in Hub. It can read saved launcher settings and show a folder picker. It cannot update bridges, migrate settings, install apps, or change shortcuts. The host path alone does not verify its publisher."))
-                        .title("Open MCP in Creator Hub?").kind(MessageDialogKind::Info)
-                        .buttons(MessageDialogButtons::OkCancelCustom("Open read-only preview".into(), "Not now".into())).blocking_show(),
-                    |command, args| dispatch(&app, command, args));
-                if let Err(error) = &result { eprintln!("Hosted MCP stopped: {error}"); }
+                let _host_image = host_image;
+                let result = serve_authorized(
+                    &mut std::io::stdin().lock(),
+                    &mut std::io::stdout().lock(),
+                    files,
+                    |writable| authorize(&app, &host, &host_hash, writable),
+                    |command, args| dispatch(&app, command, args),
+                );
+                if let Err(error) = &result {
+                    eprintln!("Hosted MCP stopped: {error}");
+                }
                 app.exit(if result.is_ok() { 0 } else { 1 });
             });
             Ok(())
         })
-        .build(context).map_err(|error| error.to_string())?
+        .build(context)
+        .map_err(|error| error.to_string())?
         .run(crate::lifecycle::run_event);
     Ok(())
+}
+
+fn authorize(
+    app: &tauri::AppHandle,
+    host: &str,
+    host_hash: &str,
+    writable: bool,
+) -> Result<Permission, String> {
+    let (message, button) = if writable {
+        (format!("Enable the normal MCP controls in this running Creator Hub?\n\n{host}\nSHA-256: {host_hash}\n\nThis permits launcher settings, selected AI-client configuration and Unity bridge changes when you use their controls. Only approve the Hub you intentionally opened. Its exact running image is locked for this session; the fingerprint is not a publisher signature. This does not install updates, adopt shortcuts, or stop any client."), "Enable MCP controls")
+    } else {
+        (format!("Open MCP's read-only preview inside this Creator Hub window?\n\n{host}\n\nOnly continue if you just chose MCP in Hub. It can read saved launcher settings and show a folder picker. It cannot update bridges, migrate settings, install apps, or change shortcuts. The host path alone does not verify its publisher."), "Open read-only preview")
+    };
+    if !app
+        .dialog()
+        .message(message)
+        .title("Open MCP in Creator Hub?")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            button.into(),
+            "Not now".into(),
+        ))
+        .blocking_show()
+    {
+        return Err("Opening MCP in Hub was declined. Standalone MCP is unchanged.".into());
+    }
+    if !writable {
+        return Ok(Permission::read_only());
+    }
+    #[cfg(windows)]
+    {
+        let root = app
+            .path()
+            .resource_dir()
+            .map_err(|_| "Cannot locate MCP resources.")?
+            .join("server");
+        let payload = crate::hosted_payload::lock(&root)?;
+        let owner = crate::gui_owner::GuiWriteOwner::current_user()
+            .map_err(|_| "Another MCP window owns these settings, or exclusive access is unavailable. No window was closed.")?;
+        let settings = dirs::config_dir()
+            .ok_or("Cannot locate settings.")?
+            .join(crate::APP_CONFIG_DIR);
+        let mut journal = crate::hosted_journal::Journal::open(&settings)?;
+        if !journal.pending().is_empty() {
+            let message = format!("An earlier MCP operation did not record its outcome:\n\n{}\n\nInspect those settings or projects before repeating the operation. Nothing will be retried or rolled back automatically. Acknowledging this warning does not mark it successful.\n\nLocal record: {}", journal.pending().join(", "), settings.join("hosted-operation-outcomes.json").display());
+            if !app
+                .dialog()
+                .message(message)
+                .title("Previous MCP outcome needs checking")
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Acknowledge".into(),
+                    "Not now".into(),
+                ))
+                .blocking_show()
+            {
+                return Err(
+                    "Previous operation remains unreviewed; writable hosting was not opened."
+                        .into(),
+                );
+            }
+            journal.acknowledge_unknowns()?;
+        }
+        if !app.manage(crate::hosted_payload::Root(root)) {
+            return Err("Hosted resource authority already exists.".into());
+        }
+        Ok(Permission {
+            writable: true,
+            journal: Some(journal),
+            _owner: Some(owner),
+            _payload: payload,
+        })
+    }
+    #[cfg(not(windows))]
+    Err("Writable native hosting is currently Windows-only.".into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_links_are_limited_to_exact_official_stable_tags() {
+        let base = "https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/";
+        assert!(official_url(&format!("{base}v2.7.0")));
+        for tag in [
+            "v2.7.0/anything",
+            "v2.7.0?redirect=elsewhere",
+            "v2.7.0#x",
+            "../settings",
+            "v02.7.0",
+            "v2.7.0-rc.1",
+        ] {
+            assert!(!official_url(&format!("{base}{tag}")));
+        }
+        assert!(!official_url(
+            "https://github.com.example.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP"
+        ));
+    }
 
     fn request(id: u64, command: &str) -> String {
         format!(
@@ -470,9 +667,8 @@ mod tests {
     }
 
     #[test]
-    fn writable_or_unknown_initialization_never_prompts_or_dispatches() {
+    fn unknown_initialization_never_prompts_or_dispatches() {
         for args in [
-            json!({"hostingRevision":2,"requestedMode":"writable"}),
             json!({"hostingRevision":3,"requestedMode":"read-only"}),
             json!({"hostingRevision":2,"requestedMode":"read-only","consent":true}),
         ] {
@@ -489,6 +685,77 @@ mod tests {
             .is_err());
             assert!(output.is_empty());
         }
+    }
+
+    #[test]
+    fn writable_negotiation_requires_explicit_native_permission() {
+        let hello = request(0, "initialize").replace(
+            "\"args\":{}",
+            "\"args\":{\"hostingRevision\":2,\"requestedMode\":\"writable\"}",
+        );
+        let mut output = Vec::new();
+        serve_authorized(
+            &mut hello.as_bytes(),
+            &mut output,
+            BTreeMap::new(),
+            |writable| {
+                assert!(writable);
+                Err("Declined".into())
+            },
+            |_, _| panic!("Declined request dispatched"),
+        )
+        .unwrap();
+        assert_eq!(replies(&output).len(), 1);
+        assert_eq!(replies(&output)[0]["ok"], false);
+        output.clear();
+        assert!(serve_authorized(
+            &mut hello.as_bytes(),
+            &mut output,
+            BTreeMap::new(),
+            |_| Ok(Permission::read_only()),
+            |_, _| panic!()
+        )
+        .is_err());
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn writable_transport_requires_its_own_workflow_before_mutation() {
+        let hello = request(0, "initialize").replace(
+            "\"args\":{}",
+            "\"args\":{\"hostingRevision\":2,\"requestedMode\":\"writable\"}",
+        );
+        // Never acquire production configuration ownership in a unit test.
+        let input = hello
+            + &request(1, "save_config")
+            + &request(2, "begin_ui_operation")
+            + &request(3, "save_config");
+        let mut output = Vec::new();
+        let mut calls = Vec::new();
+        serve_authorized(
+            &mut input.as_bytes(),
+            &mut output,
+            BTreeMap::new(),
+            |_| {
+                let mut permission = Permission::read_only();
+                permission.writable = true;
+                Ok(permission)
+            },
+            |command, _| {
+                calls.push(command.to_owned());
+                Ok(Value::Null)
+            },
+        )
+        .unwrap();
+        assert_eq!(calls, ["save_config"]);
+        let frames = replies(&output);
+        assert_eq!(frames[0]["result"]["effectiveMode"], "writable");
+        assert!(frames
+            .iter()
+            .any(|frame| frame["id"] == 1 && frame["ok"] == false));
+        assert!(frames
+            .iter()
+            .any(|frame| frame["id"] == 3 && frame["ok"] == true));
     }
 
     #[test]

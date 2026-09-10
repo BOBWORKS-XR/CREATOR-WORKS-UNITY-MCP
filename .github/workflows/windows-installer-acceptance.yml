@@ -1,0 +1,50 @@
+name: Windows installer acceptance (test only)
+
+on:
+  # New workflows cannot be manually dispatched until present on the default branch.
+  # Only an explicitly approved test-branch push may start this first acceptance run.
+  push:
+    branches:
+      - feature/creator-hub-compatibility
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installed-upgrade:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm test
+      - run: npm run check:version
+      - run: npm run release:launcher
+      - run: npm audit --audit-level=low
+      - run: cargo test --release
+        working-directory: launcher/src-tauri
+      - run: npx --yes @tauri-apps/cli@2.9.6 build --bundles nsis
+        working-directory: launcher
+      - name: Native installed upgrade on disposable runner only
+        shell: powershell
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          .\scripts\test-installed-upgrade-ci.ps1 -Installer "launcher\src-tauri\target\release\bundle\nsis\Creator Works MCP_${version}_x64-setup.exe"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-installer-acceptance
+          path: artifacts/installed-upgrade-ci/
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: mcp-windows-prerelease-candidate
+          path: launcher/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
