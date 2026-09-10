@@ -2,7 +2,17 @@
 
 Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[Download 2.6.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0) | [Release notes](docs/releases/2.6.0.md) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+[All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases) | [2.7.0-alpha.1 preview notes](docs/releases/2.7.0-alpha.1.md) | [2.6.0 stable notes](docs/releases/2.6.0.md)
+
+**Windows preview: 2.7.0-alpha.1** adds the coordinated Creator Hub experience,
+the compact shared app interface, guarded installer upgrades, and complete packaged
+dependency notices. The exact approved build can run its normal controls inside
+Hub after native consent, while the standalone app remains available. This is a
+test release, not a stable replacement or an automatic migration of old installs.
+
+Hub users should update to the coordinated preview instead of installing the old
+2.6.0 Windows package: Hub blocks that specific installer because of its setup
+defect. Existing verified 2.6.0 installations can still be opened.
 
 **2.6.0 brings the first token-efficiency release to stable**, with deep-hierarchy
 and command-status fixes, measured transform receipts, optional local feedback,
@@ -46,7 +56,7 @@ installer, Unity AI integration, or a player emulator.
 
 ## Quick Start
 
-1. Download the Windows x64 setup EXE or the matching Linux/macOS package from [2.6.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0).
+1. For Windows testing, use the coordinated preview from [Releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases), or install/update it inside Creator Hub with **Include prereleases** enabled. Linux/macOS packages remain on the separate stable release track.
 2. Open **Creator Works MCP** and choose a Unity project.
 3. Select the MCP clients you want to configure.
 4. Press **Set Up Creator Works MCP**.
