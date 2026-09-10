@@ -46,10 +46,23 @@ jobs:
       - run: npm test
       - run: npm run check:version
       - run: npm run release:launcher
+      - name: Read reviewed license tooling revision
+        id: notices
+        shell: pwsh
+        run: |
+          $pin = Get-Content scripts/notices-tool.json -Raw | ConvertFrom-Json
+          "revision=$($pin.revision)" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@v6
+        with:
+          repository: BOBWORKS-XR/CREATOR-HUB
+          ref: ${{ steps.notices.outputs.revision }}
+          path: artifacts/notices-tool
+          persist-credentials: false
+      - run: node scripts/prepare-installer-notices.mjs
       - run: npm audit --audit-level=low
       - run: cargo test --release
         working-directory: launcher/src-tauri
-      - run: npx --yes @tauri-apps/cli@2.9.6 build --bundles nsis
+      - run: npx --yes @tauri-apps/cli@2.9.6 build --bundles nsis --config ../release/tauri-notices.json -- --locked
         working-directory: launcher
       - name: Native installed upgrade on disposable runner only
         shell: powershell

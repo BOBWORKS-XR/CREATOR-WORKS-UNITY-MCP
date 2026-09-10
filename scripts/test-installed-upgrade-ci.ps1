@@ -63,6 +63,11 @@ function Verify-Candidate {
     # against the actual extracted installer, never the companion portable EXE.
     Require ((Hash (Join-Path $installRoot 'creator-works-mcp-launcher.exe')) -eq (Hash (Join-Path $extracted 'creator-works-mcp-launcher.exe'))) 'Installed launcher differs from the installer payload.'
     foreach ($pair in $pairs) { Require ((Hash (Join-Path $installRoot $pair[0])) -eq (Hash (Join-Path $repo $pair[1]))) "Installed payload mismatch: $($pair[0])" }
+    foreach ($name in @('LICENSE.txt', 'THIRD_PARTY_NOTICES.txt', 'rust-dependencies.json', 'node-dependencies.json')) {
+        $sourceHash = Hash (Join-Path $repo ('release\licenses\' + $name))
+        Require ((Hash (Join-Path $extracted ('licenses\' + $name))) -eq $sourceHash) "Packaged license differs: $name"
+        Require ((Hash (Join-Path $installRoot ('licenses\' + $name))) -eq $sourceHash) "Installed license differs: $name"
+    }
     Require ((Get-ItemProperty -LiteralPath $uninstallKey).DisplayVersion -eq $version) 'Registry version did not advance.'
     Require ((Hash (Join-Path $configRoot 'launcher-config.json')) -eq $script:configHash) 'Settings sentinel changed.'
     Require ((Hash (Join-Path $installRoot 'user-content-sentinel.txt')) -eq $script:sentinelHash) 'Unmanaged content sentinel changed.'

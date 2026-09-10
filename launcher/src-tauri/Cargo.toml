@@ -3,6 +3,7 @@ name = "creator-works-mcp-launcher"
 version = "2.7.0-alpha.1"
 description = "Creator Works MCP Configuration Launcher"
 authors = ["Creator Works"]
+license = "MIT"
 edition = "2021"
 
 [build-dependencies]

@@ -10,6 +10,8 @@ permissions:
 
 jobs:
   windows:
+    # Preview assets are published from the exact installed-acceptance artifact.
+    if: ${{ !contains(github.ref_name, '-') }}
     name: Windows installer and standalone bundle
     runs-on: windows-latest
     steps:
@@ -78,6 +80,7 @@ jobs:
           }
 
   linux:
+    if: ${{ !contains(github.ref_name, '-') }}
     name: Linux AppImage, DEB, and RPM bundle
     runs-on: ubuntu-22.04
     steps:
@@ -120,6 +123,7 @@ jobs:
           args: "--bundles appimage,deb,rpm"
 
   macos:
+    if: ${{ !contains(github.ref_name, '-') }}
     name: macOS DMG bundle
     runs-on: macos-latest
     steps:
