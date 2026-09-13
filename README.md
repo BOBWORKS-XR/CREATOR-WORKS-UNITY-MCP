@@ -2,7 +2,22 @@
 
 Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[Download 2.6.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0) | [Release notes](docs/releases/2.6.0.md) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+[Windows Hub preview](https://github.com/BOBWORKS-XR/CREATOR-HUB/releases/tag/v0.1.0-alpha.6) | [Standalone Windows preview](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.7.0-alpha.1) | [Linux/macOS stable packages](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+
+**Windows preview: MCP 2.7.0-alpha.1 with Creator Hub 0.1.0-alpha.6.** Install
+Hub, leave **Include prereleases** enabled, and choose **Install app** or **Update
+app** on its MCP page. Your existing MCP project list and settings stay with MCP.
+The normal standalone app remains available; hosting inside Hub asks for consent.
+
+The matching [Creator Project Setup 0.3.0-alpha.6](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases/tag/v0.3.0-alpha.6)
+is optional. This Hub/Setup update improves requirement and download progress;
+**MCP 2.7.0-alpha.1 is unchanged**, with no new MCP installer, server or bridge
+payload. Update Hub before Project Setup. See [Hub's tested scope and known limits](https://github.com/BOBWORKS-XR/CREATOR-HUB/releases/tag/v0.1.0-alpha.6).
+
+Hub blocks the older Windows 2.6.0 installer because of its setup problem, but
+an existing MCP installation can still be used. Do not uninstall or delete app
+data just to make an update appear. Unknown, duplicate and historical MSI installs
+may need attention. Linux/macOS packages remain on the separate 2.6.0 stable track.
 
 **2.6.0 brings the first token-efficiency release to stable**, with deep-hierarchy
 and command-status fixes, measured transform receipts, optional local feedback,
@@ -46,7 +61,7 @@ installer, Unity AI integration, or a player emulator.
 
 ## Quick Start
 
-1. Download the Windows x64 setup EXE or the matching Linux/macOS package from [2.6.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0).
+1. On Windows, start with [Creator Hub](https://github.com/BOBWORKS-XR/CREATOR-HUB/releases/tag/v0.1.0-alpha.6) and install/update MCP inside it, or choose the [standalone 2.7.0-alpha.1 installer](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.7.0-alpha.1). For Linux/macOS, use the matching [2.6.0 stable package](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0).
 2. Open **Creator Works MCP** and choose a Unity project.
 3. Select the MCP clients you want to configure.
 4. Press **Set Up Creator Works MCP**.
@@ -62,7 +77,7 @@ the selected project, and let Unity compile. After reconnecting the MCP client,
 check the project path, bridge version, and selected tool profile before editing.
 The installer alone does not establish compatibility with every SDK or project.
 
-During an EXE upgrade, Setup checks whether its private runtime is still active. If prompted, save your work, fully close Codex, Claude Code, and Creator Works MCP, then select **Retry**. Setup never force-closes those applications; an unattended install exits with code `10` while the runtime is locked.
+During an EXE upgrade, Setup checks whether its private runtime is still active. If prompted, save your work, disconnect MCP in the identified AI client and close the affected app normally, then retry. Hub's **Check again** only checks local status; it does not stop processes. Setup never force-closes those applications; an unattended install exits with code `10` while the runtime is locked.
 
 For the one-time move from the v2.5.0 MSI to the v2.5.1 EXE, close MCP clients before starting Setup. The old MSI must be removed before the new guarded EXE update path takes over.
 
