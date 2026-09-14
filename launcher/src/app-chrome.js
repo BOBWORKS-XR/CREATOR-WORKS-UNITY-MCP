@@ -78,6 +78,10 @@ menu.addEventListener('click', async event => {
   event.preventDefault();
   if (item.getAttribute('aria-disabled') === 'true') return;
   closeMenu(true);
+  if (item.dataset.localView) {
+    window.CreatorMcpViews.show(item.dataset.localView);
+    return;
+  }
   const url = publicPages[item.dataset.appLink];
   if (!url) return;
   try {

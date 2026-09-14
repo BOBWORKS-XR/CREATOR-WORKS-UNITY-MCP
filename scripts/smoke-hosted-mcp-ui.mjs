@@ -87,16 +87,33 @@ try {
   assert.equal(await frame.locator('#workspaceControls').evaluate(el => el.disabled), true);
   assert.equal(await frame.locator('.header').isVisible(), false);
   assert.equal(await frame.locator('.footer').isVisible(), false);
+  assert.equal(await frame.locator('#view-plugins').isVisible(), false);
+  assert.equal(await frame.locator('#suite-shell').isVisible(), false);
   assert.deepEqual(await page.evaluate(() => fixture.calls.map(item => item.command)), ['get_hosted_snapshot']);
   assert.equal(await frame.locator('.project-card').count(), 2);
   checks.push('shared UI loads one read-only snapshot, no startup migration or update fetch');
+  const communityDenied = await frame.locator('body').evaluate(async () => {
+    window.CreatorMcpViews.show('plugins');
+    const results = [];
+    for (const command of ['community_catalogue', 'open_community_link', 'download_community_package']) {
+      for (const invoke of [window.CreatorCommunityInvoke, window.CreatorRuntime.invoke]) {
+        try { await invoke(command, {}); results.push(false); } catch { results.push(true); }
+      }
+    }
+    return results;
+  });
+  assert.deepEqual(communityDenied, Array(6).fill(true));
+  assert.equal(await frame.locator('#view-plugins').isVisible(), false);
+  assert.equal(await frame.locator('#view-mcp').isVisible(), true);
+  assert.deepEqual(await page.evaluate(() => fixture.calls.map(item => item.command)), ['get_hosted_snapshot']);
+  checks.push('hosted Plugins navigation stays hidden and all community commands are blocked before transport');
   for (const width of [900, 560, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     const geometry = await frame.locator('body').evaluate(() => ({
       width: innerWidth, scroll: document.documentElement.scrollWidth,
       fieldsDisabled: [...document.querySelectorAll('#workspaceControls button, #workspaceControls input, #workspaceControls select')].every(el => el.matches(':disabled')),
       title: document.querySelector('#hostedPreview strong').textContent,
-      images: [...document.images].every(img => img.complete && img.naturalWidth > 0),
+      images: [...document.images].filter(img => img.getAttribute('src')).every(img => img.complete && img.naturalWidth > 0),
     }));
     assert.equal(geometry.width, geometry.scroll, `overflow at ${width}`);
     assert.equal(geometry.fieldsDisabled, true);

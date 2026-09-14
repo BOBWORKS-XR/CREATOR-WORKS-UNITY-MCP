@@ -1,0 +1,33 @@
+{
+  "$schema": "../../../schemas/listing.schema.json",
+  "schemaVersion": 1,
+  "id": "egon-gb.start-location",
+  "version": "0.0.0-review.1",
+  "name": "Start Location",
+  "category": "graph",
+  "description": "Choose where players start in your space with a small Visual Scripting graph and a scene object as the spawn point.",
+  "author": { "name": "Mr. E", "discord": "egon.gb" },
+  "license": "Open licence reported; exact terms pending",
+  "licensePath": "packages/egon-gb.start-location/0.0.0-review.1/LICENSE-NOTES.md",
+  "instructionsPath": "packages/egon-gb.start-location/0.0.0-review.1/README.md",
+  "previewImage": "https://cdn.sidequestvr.com/file/4591279/image.png",
+  "compatibility": { "unity": [], "creatorSdk": [], "banterSdk": [] },
+  "dependencies": ["Unity Visual Scripting", "SideQuest Creator SDK / Set Space Settings subgraph"],
+  "includesCode": true,
+  "scope": "both",
+  "reviewStatus": "pending",
+  "usage": "Assign the Start-Location graph to a Script Machine on the GameObject you want to use as the starting location. The On Start event calls Set Space Settings, with This connected to Spawn Object. Review the other space settings before use; the graph configures more than the spawn point.",
+  "testNotes": "Archive inspected only, not imported or tested in Unity. The supplied package also contains a sample scene and two tutorial C# scripts, including an InitializeOnLoad editor script. These are not needed to describe the spawn graph and require review before publishing a downloadable listing. A Creator SDK 4.0.14 sample path is present; this is not proof of compatibility. The version is a catalogue review identifier, not an author-supplied version.",
+  "contents": [
+    "Assets/Start-Location.asset",
+    "Assets/teleport-OnStart.unity",
+    "Assets/Samples/SideQuest Creator SDK/4.0.14/Basics/-SharedAssets-/Subgraphs/SpaceSettings/SpaceSettings.asset",
+    "Assets/TutorialInfo/Scripts/Editor/ReadmeEditor.cs",
+    "Assets/TutorialInfo/Scripts/Readme.cs"
+  ],
+  "download": {
+    "url": "https://cdn.sidequestvr.com/file/4591278/start-location.unitypackage",
+    "byteLength": 16046,
+    "sha256": "e00af934526d255547181f55b5e0c430e35af9cd25ae18e8c7748f49ce4f4e43"
+  }
+}

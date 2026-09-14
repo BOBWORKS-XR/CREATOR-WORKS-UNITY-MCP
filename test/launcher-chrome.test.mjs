@@ -8,7 +8,7 @@ const html = fs.readFileSync('launcher/src/index.html', 'utf8');
 const chrome = fs.readFileSync('launcher/src/app-chrome.js', 'utf8');
 const source = fs.readFileSync('launcher/src/app.js', 'utf8');
 
-test('standalone switcher exposes only public pages with truthful future states', () => {
+test('standalone switcher keeps external links public and local navigation explicit', () => {
   assert.match(html, /aria-haspopup="menu" aria-expanded="false"/);
   assert.match(html, /aria-current="page"/);
   assert.match(html, /In development/);
@@ -42,15 +42,28 @@ test('Hub badge uses a three-face cube backplate without replacing the original 
   assert.match(html, /app-icon app-icon-hub[^>]*><img src="creator-works-logo.png"/);
 });
 
-test('future Converter and Plugins entries remain disabled and non-installable', () => {
+test('Converter remains disabled while Plugins opens the local catalogue', () => {
   assert.equal(createHash('sha256').update(fs.readFileSync('launcher/src/sidequest-mark-white.svg')).digest('hex'),
     'bd5e1350ad3e1f6a3b767945f43631aa85b3ebb3f4278b1634d86c6e88cf14d6');
   assert.match(html, /aria-disabled="true">\s*<span class="app-icon app-icon-converter"/);
   assert.match(html, /sidequest-mark-white.svg/);
   assert.match(html, /Creator Converter<\/strong><small>SideQuest \/ Coming soon/);
-  assert.match(html, /Creator Plugins<\/strong><small>Coming soon/);
+  assert.match(html, /data-local-view="plugins"/);
+  assert.match(html, /Creator Plugins<\/strong><small>Community creations/);
+  assert.match(html, /id="view-plugins" class="hidden" hidden inert/);
   assert.doesNotMatch(html, /URP Converter/);
   assert.match(chrome, /if \(item.getAttribute\('aria-disabled'\) === 'true'\) return/);
+});
+
+test('result-returning community operations retain the existing workflow guard', async () => {
+  const f = fixture();
+  f.context.action = async () => 'saved fixture';
+  assert.equal(await vm.runInContext('runUIOperation(action, true)', f.context), 'saved fixture');
+  assert.deepEqual(f.calls.map(c => c.name), ['begin_ui_operation', 'finish_ui_operation']);
+  f.context.action = async () => { throw new Error('download refused'); };
+  await assert.rejects(vm.runInContext('runUIOperation(action, true)', f.context), /download refused/);
+  assert.equal(f.fieldset.disabled, false);
+  assert.equal(f.messages.length, 0);
 });
 
 function fixture() {

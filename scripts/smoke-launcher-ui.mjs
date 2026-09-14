@@ -17,6 +17,12 @@ const files = new Map([
   ['/styles.css', ['styles.css', 'text/css']], ['/app.js', ['app.js', 'text/javascript']],
   ['/app-chrome.js', ['app-chrome.js', 'text/javascript']],
   ['/runtime.js', ['runtime.js', 'text/javascript']],
+  ['/community-adapter.js', ['community-adapter.js', 'text/javascript']],
+  ['/community.js', ['community.js', 'text/javascript']],
+  ['/community.css', ['community.css', 'text/css']],
+  ['/icons/puzzle.svg', ['icons/puzzle.svg', 'image/svg+xml']],
+  ['/icons/refresh-cw.svg', ['icons/refresh-cw.svg', 'image/svg+xml']],
+  ['/icons/download.svg', ['icons/download.svg', 'image/svg+xml']],
   ['/updates.js', ['updates.js', 'text/javascript']], ['/creator-works-logo.png', ['creator-works-logo.png', 'image/png']],
   ['/sidequest-mark-white.svg', ['sidequest-mark-white.svg', 'image/svg+xml']],
   ['/icons/external-link.svg', ['icons/external-link.svg', 'image/svg+xml']]
@@ -39,13 +45,15 @@ try {
   const context = await browser.newContext();
   const failures = [];
   await context.route('**/*', route => route.request().url().startsWith(base + '/') ? route.continue() : route.abort());
-  await context.addInitScript(() => {
+  const communityEntry = JSON.parse(await fs.readFile(path.join(root, 'launcher/tests/fixtures/community/start-location.json'), 'utf8'));
+  await context.addInitScript(entry => {
     const channel = (id, name) => ({ id, name, unity_project_path: `C:\\UnityFixtures\\${name}` });
     const channels = [channel('a', 'Creator Forest'), channel('b', 'Banter Playground'), channel('c', 'Unity Sandbox')];
     const state = window.fixture = { calls: [], links: [], gates: {}, errors: {}, channels,
       config: { channels, active_channel_id: 'a', mcp_server_path: 'C:\\CreatorWorks\\server.mjs',
         tool_groups: 'core', auto_start: true, enable_custom_scripts: false, allow_all_tests: true,
         automatic_update_checks: false } };
+    state.community = {entries:[{...entry, previewImage:null}, {...entry, id:'fixture.download', name:'Download test fixture', author:{name:'Fixture author'}, category:'prefab', reviewStatus:'listed', previewImage:null}], warnings:[], stale:false};
     state.hold = name => new Promise(resolve => { state.gates[name] = resolve; });
     const profile = project => ({ profile: project?.includes('Banter') ? 'banter' : 'creator',
       label: state.long ? 'Creator SDK 4.0.14 experimental compatibility verification pending' :
@@ -59,6 +67,9 @@ try {
         switch (name) {
           case 'begin_ui_operation': return 1;
           case 'finish_ui_operation': return;
+          case 'community_catalogue': return structuredClone(state.community);
+          case 'open_community_link': return;
+          case 'download_community_package': await state.hold('download'); return 'Saved fixture package; no Unity import.';
           case 'load_config': return structuredClone(state.config);
           case 'save_config': state.config = structuredClone(args.config); return;
           case 'discover_unity_projects': return state.config.channels.map(c => ({name:c.name,path:c.unity_project_path,unityVersion:'6000.3.21f1'}));
@@ -83,7 +94,7 @@ try {
         }
       } }
     };
-  });
+  }, communityEntry);
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => failures.push(error.message));
@@ -101,7 +112,7 @@ try {
         headerHeight:header.height, font:getComputedStyle(document.body).fontFamily,
         titleX:document.querySelector('.brand-lockup').getBoundingClientRect().x,
         bg:getComputedStyle(document.body).backgroundColor,
-        images:[...document.images].every(img => img.complete && img.naturalWidth > 0),
+        images:[...document.images].filter(img => img.hasAttribute('src')).every(img => img.complete && img.naturalWidth > 0),
         badgeVisible:[...document.querySelectorAll('.project-meta')].every(el => getComputedStyle(el).display !== 'none') };
     });
     if (geometry.scroll !== geometry.viewport) {
@@ -159,7 +170,9 @@ try {
   assert.equal(await items.nth(4).evaluate(el => el === document.activeElement), true);
   await page.keyboard.press('Enter');
   assert.deepEqual(await page.evaluate(() => fixture.links), []);
-  assert.equal(await menu.isVisible(), true);
+  await closed();
+  assert.equal(await page.locator('#view-plugins').isVisible(), true);
+  await toggle.press('ArrowDown');
   await page.keyboard.press('Home');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
@@ -231,7 +244,7 @@ try {
     loaded:el.querySelector('img').naturalWidth > 0, badge:el.querySelector('.app-letter').textContent
   }));
   assert.deepEqual(converterMark,{background:'rgb(0, 0, 0)',radius:'5px',width:34,imageWidth:22,loaded:true,badge:'C'});
-  checks.push('official SideQuest Converter mark and non-actionable Converter/Plugins entries');
+  checks.push('official SideQuest Converter mark and non-actionable Converter entry');
   await page.screenshot({path:path.join(output,'desktop-menu.png')});
   await page.keyboard.press('Escape');
   await closed();
@@ -404,6 +417,50 @@ try {
   await toggle.click();
   await closed();
   checks.push('reduced-motion disables all drawer and title transitions');
+  const configBeforePlugins = await page.evaluate(() => JSON.stringify(fixture.config));
+  await page.locator('#projectPath').fill('C:\\UnsavedFixtureDraft');
+  await toggle.click();
+  await page.locator('[data-local-view="plugins"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.community-item').length === 2 && !document.querySelector('[data-community-download]').disabled);
+  assert.match(await page.locator('[data-id="egon-gb.start-location"]').innerText(), /Mr\. E \/ egon\.gb/);
+  assert.equal(await page.locator('[data-id="egon-gb.start-location"] [data-community-download]').count(), 0);
+  await page.locator('[data-category="graph"]').click();
+  assert.equal(await page.locator('.community-item').count(), 1);
+  for (const width of [900, 560, 390]) {
+    await page.setViewportSize({width, height:800});
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({path:path.join(output,`community-${width}.png`),fullPage:true});
+  }
+  await page.locator('[aria-label="Search contributions"]').fill('missing test item');
+  assert.equal(await page.locator('.community-item').count(), 0);
+  await page.getByRole('button', {name:'Clear filters',exact:true}).click();
+  assert.equal(await page.locator('.community-item').count(), 2);
+  await page.locator('[data-id="fixture.download"] [data-community-download]').click();
+  await page.waitForFunction(() => typeof fixture.gates.download === 'function');
+  await toggle.click();
+  await page.locator('[data-local-view="mcp"]').click();
+  assert.equal(await page.locator('#workspaceControls').evaluate(el => el.disabled), true);
+  assert.equal(await page.locator('#setupBtn').isDisabled(), true);
+  assert.equal(await page.locator('#projectPath').inputValue(), 'C:\\UnsavedFixtureDraft');
+  const blocked = await page.evaluate(() => CreatorCommunityInvoke('download_community_package',{id:'fixture.download'}).catch(String));
+  assert.match(blocked, /Another MCP operation/);
+  await page.evaluate(() => fixture.gates.download());
+  await page.waitForFunction(() => !document.getElementById('workspaceControls').disabled);
+  await toggle.click();
+  await page.locator('[data-local-view="plugins"]').click();
+  assert.match(await page.locator('.community-message').innerText(), /Saved fixture/);
+  assert.equal(await page.locator('[data-community-download]').isEnabled(), true);
+  await page.evaluate(() => { fixture.community.stale = true; });
+  await page.getByRole('button', {name:'Refresh catalogue',exact:true}).click();
+  await page.waitForFunction(() => document.querySelector('.community-count').textContent.includes('refresh required'));
+  assert.equal(await page.locator('[data-community-download]').isDisabled(), true);
+  await page.evaluate(() => { fixture.errors.community_catalogue = 'Fixture offline'; });
+  await page.getByRole('button', {name:'Refresh catalogue',exact:true}).click();
+  await page.waitForFunction(() => document.querySelector('.community-message').textContent.includes('Fixture offline'));
+  assert.equal(await page.locator('[data-community-download]').isDisabled(), true);
+  assert.equal(await page.evaluate(() => JSON.stringify(fixture.config)), configBeforePlugins);
+  assert.equal(await page.evaluate(() => fixture.calls.filter(c => c.name === 'download_community_package').length), 1);
+  checks.push('Plugins lazy loading, initial download readiness, pending review, author credit, filters, 900/560/390px layouts, preserved drafts, download workflow exclusion and stale/offline refusal');
   await fs.writeFile(path.join(output,'motion-results.json'),JSON.stringify({motion,reversed,short,reduced},null,2) + '\n');
   assert.deepEqual(failures,[]);
   const report = {success:true, checks, limitations:'Mocked browser/Tauri only. No native GUI, real setup, install or Unity runtime actions performed.'};

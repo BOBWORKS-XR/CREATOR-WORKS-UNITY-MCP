@@ -12,9 +12,9 @@ The Windows launcher uses [Tauri](https://github.com/tauri-apps/tauri), distribu
 
 ## Launcher Icons
 
-The app switcher's `external-link` SVG is an unmodified asset from
+The launcher's `external-link`, `download`, `puzzle`, and `refresh-cw` SVGs are unmodified assets from
 [Lucide](https://github.com/lucide-icons/lucide), `lucide-static` 1.44.0. Lucide
-uses ISC terms; this Feather-derived icon also carries the upstream MIT notice.
+uses ISC terms; Feather-derived icons also carry the upstream MIT notice.
 The complete notice is included at `launcher/src/icons/LICENSE-lucide` alongside
 the assets. No icon runtime dependency is added. The cube bitmap remains the
 existing Creator Works logo.

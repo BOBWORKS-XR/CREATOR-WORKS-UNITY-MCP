@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod community;
+mod community_api;
 mod feedback;
 #[cfg(windows)]
 mod gui_owner;
@@ -2109,6 +2111,7 @@ fn main() {
     }
 
     tauri::Builder::default()
+        .manage(community::Community::default())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -2129,9 +2132,12 @@ fn main() {
                     .reject("Launcher is closing or lifecycle state is unavailable");
                 return true;
             };
-            // All registered handlers are synchronous. Keep the guard alive
-            // through response generation, including failed command arguments.
+            // Synchronous handlers retain this dispatch guard. Community async
+            // adapters retain their own guards inside each blocking worker.
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+                community_api::community_catalogue,
+                community_api::open_community_link,
+                community_api::download_community_package,
                 begin_ui_operation,
                 finish_ui_operation,
                 load_config,

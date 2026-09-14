@@ -140,21 +140,26 @@ async function initializeHostedPreview() {
 
 // An ancestor fieldset locks even freshly rendered controls without overwriting
 // their own disabled states (for example unavailable feedback or setup).
-async function runUIOperation(action) {
-  if (operationActive || window.CreatorRuntime.disconnected) return;
+async function runUIOperation(action, propagate = false) {
+  if (operationActive || window.CreatorRuntime.disconnected) {
+    if (propagate) throw new Error('Another MCP operation is running or the connection is closed.');
+    return;
+  }
   operationActive = true;
   elements.workspaceControls.disabled = true;
   elements.workspaceControls.setAttribute('aria-busy', 'true');
   let lease;
   try {
     lease = await window.CreatorRuntime.invoke('begin_ui_operation');
-    await action();
+    return await action();
   } catch (error) {
+    if (propagate) throw error;
     showToast('Action failed: ' + String(error), 'error');
   } finally {
     if (lease !== undefined) {
       try { await window.CreatorRuntime.invoke('finish_ui_operation', { id: lease }); }
       catch (error) {
+        if (propagate) throw new Error('Operation lock could not be released: ' + String(error));
         showToast('Operation lock could not be released: ' + String(error), 'error');
         return;
       }
@@ -165,6 +170,8 @@ async function runUIOperation(action) {
     updateSetupButton();
   }
 }
+
+window.CreatorMcpOperations = Object.freeze({ run: action => runUIOperation(action, true) });
 
 function onOperation(element, event, action) {
   element.addEventListener(event, () => runUIOperation(action));

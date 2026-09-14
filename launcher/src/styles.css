@@ -1073,6 +1073,10 @@ h2 {
 }
 
 .creator-hosted .header, .creator-hosted .footer { display: none; }
+.creator-hosted #view-plugins, #view-mcp[hidden], #view-plugins[hidden] { display: none !important; }
+#view-plugins .icon-plugins { --icon: url('icons/puzzle.svg'); }
+#view-plugins .icon-refresh { --icon: url('icons/refresh-cw.svg'); }
+#view-plugins .icon-download { --icon: url('icons/download.svg'); }
 .creator-hosted .main { padding-top: 16px; }
 .hosted-preview:not([hidden]) {
   display: flex;
