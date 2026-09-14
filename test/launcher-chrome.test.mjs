@@ -15,8 +15,18 @@ test('standalone switcher keeps external links public and local navigation expli
   assert.match(html, /Coming soon/);
   assert.doesNotMatch(html, /FIRST RUN|Shader Graph Preview/);
   assert.doesNotMatch(chrome, /core\.invoke|dialog\.|location\.|URLSearchParams|localStorage|exec\(/);
-  assert.equal((chrome.match(/https:\/\//g) || []).length, 2);
+  assert.equal((chrome.match(/https:\/\//g) || []).length, 1);
   assert.match(chrome, /publicPages\[item.dataset.appLink\]/);
+});
+
+test('standalone navigation keeps Hub and built-in Plugins without linking Project Setup', () => {
+  assert.match(html, /data-app-link="hub"/);
+  assert.match(html, /data-local-view="mcp" aria-current="page"/);
+  assert.match(html, /data-local-view="plugins"/);
+  assert.doesNotMatch(html, /data-app-link="setup"|Creator Project Setup/);
+  assert.doesNotMatch(chrome, /setup:\s*['"]|CREATOR-PROJECT-SETUP\/releases/);
+  assert.equal((html.match(/role="menuitem"/g) || []).length, 4);
+  assert.match(html, /id="setupBtn"/); // MCP connection setup remains available.
 });
 
 test('drawer has one frame and closes accessibility immediately without transition timers', () => {
@@ -29,7 +39,7 @@ test('drawer has one frame and closes accessibility immediately without transiti
   assert.match(chrome, /preventScroll: true/);
   assert.match(chrome, /scrim.addEventListener\('click'/);
   assert.match(chrome, /if \(event.target === scrim\) return/);
-  assert.match(css, /\.app-shell.expanded \{ height: 352px; width: 224px; \}/);
+  assert.match(css, /\.app-shell.expanded \{ height: 294px; width: 224px; \}/);
   assert.match(css, /prefers-reduced-motion: reduce/);
 });
 

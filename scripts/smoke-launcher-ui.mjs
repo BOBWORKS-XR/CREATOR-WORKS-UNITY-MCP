@@ -157,7 +157,7 @@ try {
   async function expanded() {
     await page.waitForFunction(() => {
       const shell = document.getElementById('appSwitcherShell').getBoundingClientRect();
-      return shell.width === 224 && shell.height === Math.min(352, innerHeight - 24) &&
+      return shell.width === 224 && shell.height === Math.min(294, innerHeight - 24) &&
         getComputedStyle(document.getElementById('appSwitcherMenu')).opacity === '1';
     });
     assert.equal(await menu.evaluate(el => el.inert),false);
@@ -165,9 +165,12 @@ try {
   }
   await toggle.focus();
   await page.keyboard.press('Enter');
+  assert.equal(await items.count(), 4);
+  assert.equal(await menu.locator('[data-app-link="setup"]').count(), 0);
+  assert.deepEqual(await items.locator('strong').allTextContents(), ['Creator Hub', 'Creator Works MCP', 'Creator Converter', 'Creator Plugins']);
   assert.equal(await items.nth(0).evaluate(el => el === document.activeElement), true);
   await page.keyboard.press('ArrowUp');
-  assert.equal(await items.nth(4).evaluate(el => el === document.activeElement), true);
+  assert.equal(await items.last().evaluate(el => el === document.activeElement), true);
   await page.keyboard.press('Enter');
   assert.deepEqual(await page.evaluate(() => fixture.links), []);
   await closed();
@@ -186,7 +189,8 @@ try {
   assert.equal(await menu.isVisible(), true);
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
-  assert.deepEqual(await page.evaluate(() => fixture.links), ['https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases']);
+  assert.deepEqual(await page.evaluate(() => fixture.links), []);
+  assert.equal(await page.locator('#view-mcp').isVisible(), true);
   await closed();
   await toggle.press('ArrowDown');
   await page.keyboard.press('Escape');
@@ -259,7 +263,7 @@ try {
   await page.getByRole('alert').filter({hasText:'Could not open the public page'}).waitFor();
   await closed();
   await page.evaluate(() => { fixture.errors.link = false; document.querySelector('.toast')?.remove(); });
-  checks.push('menu keyboard, current/disabled entries, public release link, Escape, Tab and outside dismissal');
+  checks.push('four-entry menu without Project Setup; Hub public link, MCP/Plugins navigation, disabled Converter, keyboard, Escape, Tab and outside dismissal');
 
   await page.locator('#browseProjectBtn').click();
   await page.waitForFunction(() => !!fixture.gates.picker);
@@ -355,7 +359,7 @@ try {
     } while (performance.now() - start < 300);
     return samples;
   });
-  assert.ok(motion.some(s => s.w > 55 && s.w < 224 && s.h > 48 && s.h < 352), 'intermediate animation frames');
+  assert.ok(motion.some(s => s.w > 55 && s.w < 224 && s.h > 48 && s.h < 294), 'intermediate animation frames');
   assert.ok(motion.every(s => s.bodyStable && s.shellScroll === 0), 'drawer must not resize/scroll the body or frame');
   assert.equal(motion.at(-1).w,224);
   assert.equal(motion.at(-1).tabX,168);

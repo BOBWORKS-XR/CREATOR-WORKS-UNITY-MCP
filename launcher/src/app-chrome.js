@@ -1,7 +1,6 @@
 // Navigation is deliberately limited to public pages, never local app execution.
 const publicPages = Object.freeze({
-  hub: 'https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md',
-  setup: 'https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases'
+  hub: 'https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/blob/master/docs/CREATOR-HUB-PLAN.md'
 });
 
 const toggle = document.getElementById('appSwitcherToggle');

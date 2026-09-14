@@ -97,7 +97,7 @@ label[for] {
   width: 55px;
   z-index: 40;
 }
-.app-shell.expanded { height: 352px; width: 224px; }
+.app-shell.expanded { height: 294px; width: 224px; }
 .app-shell:has(.app-tab:hover) { border-color: #687780; }
 .app-drawer-title {
   color: var(--text-2);
@@ -185,7 +185,7 @@ label[for] {
 .app-icon-converter img { height: 22px; width: 22px; }
 .app-menu {
   left: 0;
-  height: 302px;
+  height: 244px;
   max-height: calc(100dvh - 74px);
   opacity: 0;
   overflow-x: hidden;
