@@ -1,0 +1,5 @@
+{
+  "name": "CreatorWorks.Plugins.Editor.Tests",
+  "references": ["CreatorWorks.Plugins.Editor"],
+  "includePlatforms": ["Editor"]
+}
