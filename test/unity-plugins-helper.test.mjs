@@ -1,9 +1,35 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 const root = 'launcher/unity/com.creatorworks.plugins';
 const source = fs.readFileSync(`${root}/Editor/CreatorPluginsWindow.cs`, 'utf8');
+
+test('all embedded helper files survive Windows and Unix checkout byte-for-byte', () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'creator-helper-checkout-'));
+  const git = args => execFileSync('git', args, { cwd: fixture, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    const files = ['Editor/CreatorPluginsWindow.cs', 'Editor/CreatorWorks.Plugins.Editor.asmdef', 'LICENSE.md', 'package.json'];
+    fs.mkdirSync(path.join(fixture, root, 'Editor'), { recursive: true });
+    fs.copyFileSync('.gitattributes', path.join(fixture, '.gitattributes'));
+    for (const file of files) fs.copyFileSync(`${root}/${file}`, path.join(fixture, root, file));
+    git(['init', '--quiet']);
+    git(['-c', 'core.autocrlf=false', 'add', '--', '.gitattributes', root]);
+    for (const file of files) {
+      const relative = `${root}/${file}`;
+      const expected = fs.readFileSync(relative);
+      assert.deepEqual(git(['show', `:${relative}`]), expected, `${file}: index bytes`);
+      for (const autocrlf of ['false', 'true']) {
+        assert.deepEqual(git(['-c', `core.autocrlf=${autocrlf}`, 'cat-file', '--filters', `:${relative}`]), expected, `${file}: autocrlf=${autocrlf}`);
+      }
+    }
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
 
 test('optional Unity catalogue package is Editor-only without an SDK or MCP dependency', () => {
   const manifest = JSON.parse(fs.readFileSync(`${root}/package.json`, 'utf8'));

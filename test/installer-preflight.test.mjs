@@ -19,6 +19,21 @@ test('installed acceptance can run on the approved test branch without publishin
   assert.doesNotMatch(workflow, /contents: write|tags:|gh release|tauri-apps\/tauri-action/);
 });
 
+test('stable and alpha upgrades test one build before exposing the accepted candidate', () => {
+  const workflow = readFileSync('.github/workflows/windows-installer-acceptance.yml', 'utf8');
+  assert.match(workflow, /baseline: \['2\.6\.0', '2\.7\.0-alpha\.1'\]/);
+  assert.equal((workflow.match(/build --bundles nsis/g) || []).length, 1);
+  assert.match(workflow, /accepted-candidate:\s+needs: \[build-candidate, installed-upgrade\]/);
+  assert.match(workflow, /EXPECTED_INSTALLER_SHA256: \$\{\{ needs\.build-candidate\.outputs\.installer-sha256 \}\}/);
+  const harness = readFileSync('scripts/test-installed-upgrade-ci.ps1', 'utf8');
+  assert.match(harness, /ValidateSet\('2\.6\.0', '2\.7\.0-alpha\.1'\)/);
+  assert.match(harness, /8f39b9f2e120076346873dc8cc3186e6a2c055e1cca4cf9b8b66dfb700f12c41/);
+  assert.match(harness, /04971c5c6cc2c3346606d4ae96bbea465c9924b564a1fe928f7d7d006527de65/);
+  assert.ok(harness.indexOf('Candidate differs from the exact installer') < harness.indexOf("Run-Setup $baseline '/S /NS'"));
+  assert.match(harness, /sourceCommit -ceq \$env:GITHUB_SHA/);
+  assert.match(harness, /baselineVersion = \$BaselineVersion/);
+});
+
 test('installed-upgrade CI harness refuses a local machine before resolving installer paths', {
   skip: process.platform !== 'win32',
 }, () => {

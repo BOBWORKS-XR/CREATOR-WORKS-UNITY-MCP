@@ -31,10 +31,12 @@ jobs:
           & 7z.exe x $baseline ('-o' + $out) 'server/runtime/node.exe' '-y' | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'Baseline runtime extraction failed.' }
           .\test\fixtures\owned-node-startup.ps1 -NodePath (Join-Path $out 'server\runtime\node.exe')
-  installed-upgrade:
+  build-candidate:
     needs: fixture-startup
     runs-on: windows-latest
     timeout-minutes: 45
+    outputs:
+      installer-sha256: ${{ steps.inputs.outputs.installer-sha256 }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -64,20 +66,89 @@ jobs:
         working-directory: launcher/src-tauri
       - run: npx --yes @tauri-apps/cli@2.9.6 build --bundles nsis --config ../release/tauri-notices.json -- --locked
         working-directory: launcher
-      - name: Native installed upgrade on disposable runner only
-        shell: powershell
+      - name: Record exact candidate and build input hashes
+        id: inputs
+        shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          .\scripts\test-installed-upgrade-ci.ps1 -Installer "launcher\src-tauri\target\release\bundle\nsis\Creator Works MCP_${version}_x64-setup.exe"
+          $directory = 'launcher/src-tauri/target/release/bundle/nsis'
+          $installer = Join-Path $directory "Creator Works MCP_${version}_x64-setup.exe"
+          $pairs = [ordered]@{
+            'server/runtime/node.exe' = 'release/runtime/node.exe'
+            'server/runtime/node' = 'release/runtime/node'
+            'server/creator-works-mcp.mjs' = 'release/creator-works-mcp.mjs'
+            'server/unity-extension/Editor/BanterMCPBridge.cs' = 'unity-extension/Editor/BanterMCPBridge.cs'
+            'licenses/LICENSE.txt' = 'release/licenses/LICENSE.txt'
+            'licenses/THIRD_PARTY_NOTICES.txt' = 'release/licenses/THIRD_PARTY_NOTICES.txt'
+            'licenses/rust-dependencies.json' = 'release/licenses/rust-dependencies.json'
+            'licenses/node-dependencies.json' = 'release/licenses/node-dependencies.json'
+          }
+          $files = @($pairs.GetEnumerator() | ForEach-Object {
+            @{ path = $_.Key; sha256 = (Get-FileHash -LiteralPath $_.Value -Algorithm SHA256).Hash.ToLowerInvariant() }
+          })
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{ schemaVersion = 1; version = $version; sourceCommit = $env:GITHUB_SHA; installerSha256 = $hash; files = $files } |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $directory 'acceptance-inputs.json')
+          "installer-sha256=$hash" >> $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcp-windows-candidate-under-test
+          path: |
+            launcher/src-tauri/target/release/bundle/nsis/*-setup.exe
+            launcher/src-tauri/target/release/bundle/nsis/acceptance-inputs.json
+          if-no-files-found: error
+
+  installed-upgrade:
+    needs: build-candidate
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        baseline: ['2.6.0', '2.7.0-alpha.1']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcp-windows-candidate-under-test
+          path: launcher/src-tauri/target/release/bundle/nsis
+      - name: Native installed upgrade on disposable runner only
+        shell: powershell
+        env:
+          EXPECTED_INSTALLER_SHA256: ${{ needs.build-candidate.outputs.installer-sha256 }}
+          BASELINE_VERSION: ${{ matrix.baseline }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          .\scripts\test-installed-upgrade-ci.ps1 -Installer "launcher\src-tauri\target\release\bundle\nsis\Creator Works MCP_${version}_x64-setup.exe" -BaselineVersion $env:BASELINE_VERSION -ExpectedInstallerSha256 $env:EXPECTED_INSTALLER_SHA256
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-installer-acceptance
+          name: windows-installer-acceptance-${{ matrix.baseline }}
           path: artifacts/installed-upgrade-ci/
           if-no-files-found: warn
+
+  accepted-candidate:
+    needs: [build-candidate, installed-upgrade]
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcp-windows-candidate-under-test
+          path: accepted
+      - name: Verify the accepted installer is unchanged
+        shell: pwsh
+        env:
+          EXPECTED_INSTALLER_SHA256: ${{ needs.build-candidate.outputs.installer-sha256 }}
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath accepted -Filter '*-setup.exe' -File)
+          if ($installers.Count -ne 1) { throw 'Expected one accepted installer.' }
+          if ((Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:EXPECTED_INSTALLER_SHA256) { throw 'Accepted installer changed.' }
       - uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: mcp-windows-prerelease-candidate
-          path: launcher/src-tauri/target/release/bundle/nsis/*-setup.exe
+          path: accepted/*-setup.exe
           if-no-files-found: error

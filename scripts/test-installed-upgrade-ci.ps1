@@ -1,4 +1,8 @@
-param([Parameter(Mandatory = $true)][string]$Installer)
+param(
+    [Parameter(Mandatory = $true)][string]$Installer,
+    [ValidateSet('2.6.0', '2.7.0-alpha.1')][string]$BaselineVersion = '2.6.0',
+    [string]$ExpectedInstallerSha256
+)
 $ErrorActionPreference = 'Stop'
 # This executes real installers. Refuse local and self-hosted environments.
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
@@ -53,20 +57,12 @@ function Snapshot {
     } | ConvertTo-Json -Depth 6 -Compress
 }
 function Verify-Candidate {
-    $pairs = @(
-        @('server\runtime\node.exe', 'release\runtime\node.exe'),
-        @('server\runtime\node', 'release\runtime\node'),
-        @('server\creator-works-mcp.mjs', 'release\creator-works-mcp.mjs'),
-        @('server\unity-extension\Editor\BanterMCPBridge.cs', 'unity-extension\Editor\BanterMCPBridge.cs')
-    )
     # Tauri stamps the NSIS payload after building the portable launcher. Compare
     # against the actual extracted installer, never the companion portable EXE.
     Require ((Hash (Join-Path $installRoot 'creator-works-mcp-launcher.exe')) -eq (Hash (Join-Path $extracted 'creator-works-mcp-launcher.exe'))) 'Installed launcher differs from the installer payload.'
-    foreach ($pair in $pairs) { Require ((Hash (Join-Path $installRoot $pair[0])) -eq (Hash (Join-Path $repo $pair[1]))) "Installed payload mismatch: $($pair[0])" }
-    foreach ($name in @('LICENSE.txt', 'THIRD_PARTY_NOTICES.txt', 'rust-dependencies.json', 'node-dependencies.json')) {
-        $sourceHash = Hash (Join-Path $repo ('release\licenses\' + $name))
-        Require ((Hash (Join-Path $extracted ('licenses\' + $name))) -eq $sourceHash) "Packaged license differs: $name"
-        Require ((Hash (Join-Path $installRoot ('licenses\' + $name))) -eq $sourceHash) "Installed license differs: $name"
+    foreach ($file in $buildInputs.files) {
+        Require ((Hash (Join-Path $extracted $file.path)) -eq $file.sha256) "Packaged build input differs: $($file.path)"
+        Require ((Hash (Join-Path $installRoot $file.path)) -eq $file.sha256) "Installed build input differs: $($file.path)"
     }
     Require ((Get-ItemProperty -LiteralPath $uninstallKey).DisplayVersion -eq $version) 'Registry version did not advance.'
     Require ((Hash (Join-Path $configRoot 'launcher-config.json')) -eq $script:configHash) 'Settings sentinel changed.'
@@ -74,18 +70,42 @@ function Verify-Candidate {
 }
 
 try {
+    Require ($ExpectedInstallerSha256 -cmatch '^[a-f0-9]{64}$') 'Expected installer hash must come from the build job.'
+    Require ((Hash $candidate) -ceq $ExpectedInstallerSha256) 'Candidate differs from the exact installer built for both baseline tests.'
+    $buildInputs = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $candidate) 'acceptance-inputs.json') -Raw | ConvertFrom-Json
+    Require ($buildInputs.schemaVersion -eq 1 -and $buildInputs.version -ceq $version -and $buildInputs.sourceCommit -ceq $env:GITHUB_SHA -and $buildInputs.installerSha256 -ceq $ExpectedInstallerSha256) 'Build inputs are not from this candidate and source revision.'
+    $expectedPaths = @('server/runtime/node.exe', 'server/runtime/node', 'server/creator-works-mcp.mjs', 'server/unity-extension/Editor/BanterMCPBridge.cs', 'licenses/LICENSE.txt', 'licenses/THIRD_PARTY_NOTICES.txt', 'licenses/rust-dependencies.json', 'licenses/node-dependencies.json')
+    Require (@($buildInputs.files).Count -eq $expectedPaths.Count) 'Build input manifest has an unexpected file count.'
+    foreach ($expectedPath in $expectedPaths) {
+        $matches = @($buildInputs.files | Where-Object { $_.path -ceq $expectedPath })
+        Require ($matches.Count -eq 1 -and $matches[0].sha256 -cmatch '^[a-f0-9]{64}$') "Missing or invalid build input: $expectedPath"
+    }
     Copy-Item -LiteralPath $candidate -Destination (Join-Path $output ([IO.Path]::GetFileName($candidate)))
     $extracted = Join-Path $output 'extracted'
     $sevenZip = (Get-Command 7z.exe -ErrorAction Stop).Source
     & $sevenZip x $candidate ('-o' + $extracted) '-y' | Out-Null
     Require ($LASTEXITCODE -eq 0) 'Candidate extraction failed.'
     Require (Test-Path -LiteralPath (Join-Path $extracted 'creator-works-mcp-launcher.exe')) 'Installer has no expected launcher payload.'
-    $baseline = Join-Path $fixture 'Creator.Works.MCP_2.6.0_x64-setup.exe'
-    Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/download/v2.6.0/Creator.Works.MCP_2.6.0_x64-setup.exe' -OutFile $baseline
-    Require ((Hash $baseline) -eq '11d6fc0fb95e33023a90a8722cf9234f82de6e175689bd915401bac3d49bc8c2') 'Public baseline hash mismatch.'
+    $baselines = @{
+        '2.6.0' = @{
+            asset = 'Creator.Works.MCP_2.6.0_x64-setup.exe'
+            installerSha256 = '11d6fc0fb95e33023a90a8722cf9234f82de6e175689bd915401bac3d49bc8c2'
+            executableSha256 = 'b712aadd91ac63ea64b5bbead28d7dc2fc83d4102f989999d7ea85b427649676'
+        }
+        '2.7.0-alpha.1' = @{
+            asset = 'Creator-Works-MCP-2.7.0-alpha.1-Windows-setup.exe'
+            installerSha256 = '8f39b9f2e120076346873dc8cc3186e6a2c055e1cca4cf9b8b66dfb700f12c41'
+            executableSha256 = '04971c5c6cc2c3346606d4ae96bbea465c9924b564a1fe928f7d7d006527de65'
+        }
+    }
+    $baselinePin = $baselines[$BaselineVersion]
+    $baseline = Join-Path $fixture $baselinePin.asset
+    Invoke-WebRequest -UseBasicParsing -Uri ("https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/download/v$BaselineVersion/" + $baselinePin.asset) -OutFile $baseline
+    Require ((Hash $baseline) -ceq $baselinePin.installerSha256) 'Public baseline hash mismatch.'
     # /R is deliberately absent: neither installer may start the real GUI.
-    Run-Setup $baseline '/S /NS' 0 'Clean baseline 2.6.0 installation'
-    Require ((Hash (Join-Path $installRoot 'creator-works-mcp-launcher.exe')) -eq 'b712aadd91ac63ea64b5bbead28d7dc2fc83d4102f989999d7ea85b427649676') 'Unexpected baseline launcher payload.'
+    Run-Setup $baseline '/S /NS' 0 "Clean baseline $BaselineVersion installation"
+    Require ((Hash (Join-Path $installRoot 'creator-works-mcp-launcher.exe')) -ceq $baselinePin.executableSha256) 'Unexpected baseline launcher payload.'
+    Require ((Get-ItemProperty -LiteralPath $uninstallKey).DisplayVersion -ceq $BaselineVersion) 'Unexpected baseline registered version.'
     $null = New-Item -ItemType Directory -Path $configRoot
     [IO.File]::WriteAllText((Join-Path $configRoot 'launcher-config.json'), '{"channels":[],"ciSentinel":"preserve-this-exact-file"}')
     [IO.File]::WriteAllText((Join-Path $installRoot 'user-content-sentinel.txt'), 'Unmanaged fixture content')
@@ -117,9 +137,10 @@ try {
 
     # Real GUI/Retry and legacy uninstall-page behavior are deliberately not inferred from /S.
     [pscustomobject]@{ passed = $true; installerSha256 = Hash $candidate; executableSha256 = Hash (Join-Path $extracted 'creator-works-mcp-launcher.exe'); version = $version; checks = @($checks.ToArray());
+        baselineVersion = $BaselineVersion; sourceCommit = $env:GITHUB_SHA; buildInputsVerified = $true;
         interactiveUpgradeTested = $false; productionUserMachineUsed = $false } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
 } catch {
-    [pscustomobject]@{ passed = $false; error = $_.Exception.Message; checks = @($checks.ToArray()) } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
+    [pscustomobject]@{ passed = $false; baselineVersion = $BaselineVersion; error = $_.Exception.Message; checks = @($checks.ToArray()) } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
     throw
 } finally {
     try { Close-OwnedNode $owned } finally { Close-OwnedNode $unrelated }

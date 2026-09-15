@@ -20,7 +20,8 @@ This is candidate evidence, not a declaration that every installation or package
 
 ## Verified Locally
 
-- Node suite: 235 passed. Native Rust debug and release suites: 98 passed,
+- Node suite: 237 passed after the packaging/upgrade-test follow-up (235 at the
+  local installer build). Native Rust debug and release suites: 98 passed,
   zero failed, five explicitly opt-in tests ignored in each configuration.
 - Standalone browser UI: 21 groups passed, including narrow windows, long names,
   project consent, busy states and the experimental notice. Hosted UI: 10 groups
@@ -61,9 +62,12 @@ identity; acceptance applies only to the exact installer tested.
 ## Remaining Gates
 
 - Run the existing Windows installed-upgrade workflow on this feature branch.
-  Its fixture covers stable `2.6.0` to `2.7.0-alpha.2`, active-runtime refusal,
-  subsequent upgrade and settings preservation. It does not cover alpha.1 to
-  alpha.2 or an interactive Retry click.
+  It now builds once, then tests those exact installer bytes on separate clean
+  runners upgrading from `2.6.0` and `2.7.0-alpha.1`. Both must pass before the
+  accepted-candidate artifact is made available. The fixture checks active-runtime
+  refusal, subsequent upgrade, build-input hashes and settings preservation.
+  These new jobs must pass; adding them is not acceptance. An interactive Retry
+  click remains untested.
 - Coordinate final packaged app-to-Unity review and companion Hub/Setup acceptance
   with Creator Works Helper. Do not use simulated callbacks or a portable build
   as substitutes for those results.
@@ -72,3 +76,20 @@ identity; acceptance applies only to the exact installer tested.
 
 No installer was run on this PC for the local candidate verification. No active
 MCP server was stopped, and no user Unity project was modified by these checks.
+
+## Cross-Platform Package Bytes
+
+Windows Git checkout could convert the helper's line endings, making its
+exact-match installation check reject a helper from another build of the same
+source. The entire four-file embedded package now uses `-text` attributes.
+The existing working licence bytes are retained explicitly in Git; this is only
+line-ending preservation, not a licence-text change. A regression test exercises
+all four files with both `core.autocrlf=false` and `true` in a disposable repository.
+
+The alpha.1 baseline was independently downloaded and extracted without running
+it. Its installer SHA-256 is
+`8f39b9f2e120076346873dc8cc3186e6a2c055e1cca4cf9b8b66dfb700f12c41`;
+the launcher SHA-256 is
+`04971c5c6cc2c3346606d4ae96bbea465c9924b564a1fe928f7d7d006527de65`.
+Both match the published descriptor and installed-acceptance report on the
+[alpha.1 release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.7.0-alpha.1).
