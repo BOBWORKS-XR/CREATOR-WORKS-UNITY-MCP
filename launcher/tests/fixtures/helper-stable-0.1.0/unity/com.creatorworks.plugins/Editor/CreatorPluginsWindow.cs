@@ -636,8 +636,6 @@ namespace CreatorWorks.Plugins
         private Listing pendingImport;
         private string search = "", message = "", queueMessage = "";
         private int category, tab;
-        internal const string LayoutPreference = "CreatorWorks.Plugins.CatalogueLayout.v1";
-        private bool gridView;
         private Vector2 scroll;
         private readonly Dictionary<string, Texture2D> previews = new Dictionary<string, Texture2D>();
         private readonly HashSet<string> previewAttempts = new HashSet<string>();
@@ -656,7 +654,7 @@ namespace CreatorWorks.Plugins
 
         [MenuItem("Creator Plugins/Browse")]
         public static void Browse() { var window = GetWindow<CreatorPluginsWindow>("Creator Plugins"); window.minSize = new Vector2(360, 360); window.Show(); }
-        private void OnEnable() { gridView = EditorPrefs.GetString(LayoutPreference, "grid") != "list"; EditorApplication.update += Tick; EditorApplication.delayCall += LoadWhenOpened; nextPoll = 0; }
+        private void OnEnable() { EditorApplication.update += Tick; EditorApplication.delayCall += LoadWhenOpened; nextPoll = 0; }
         private void OnDisable() { EditorApplication.update -= Tick; EditorApplication.delayCall -= LoadWhenOpened; StopDownload(); ClearPreviews(); }
         private void LoadWhenOpened() { if (this != null && listings.Count == 0 && request == null && !ImportReview.Busy) RefreshCatalogue(); }
         private void StopDownload() { if (request != null) { request.Abort(); request.Dispose(); request = null; } success = null; failure = null; }
@@ -925,80 +923,31 @@ namespace CreatorWorks.Plugins
             using (new EditorGUI.DisabledScope(request != null || ImportReview.Busy)) if (GUILayout.Button("Refresh catalogue")) RefreshCatalogue();
             search = EditorGUILayout.TextField("Search", search);
             category = EditorGUILayout.Popup("Type", category, Categories);
-            EditorGUILayout.BeginHorizontal(); GUILayout.FlexibleSpace();
-            int layout = GUILayout.Toolbar(gridView ? 1 : 0, new[] { new GUIContent("List", "List view"), new GUIContent("Grid", "Grid view") }, GUILayout.Width(120));
-            EditorGUILayout.EndHorizontal();
-            if ((layout == 1) != gridView) { SetLayout(layout == 1); GUIUtility.ExitGUI(); }
-            var visible = listings.Where(e => (category == 0 || e.category == CategoryKeys[category]) && (e.name + " " + e.description + " " + e.author.name + " " + e.author.discord).IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0).ToArray();
-            float available = Mathf.Max(200, position.width - 30);
-            int columns = gridView ? GridColumns(available) : 1;
-            float width = (available - (columns - 1) * 8) / columns;
-            for (int row = 0; row < visible.Length; row += columns)
+            int visibleCount = 0;
+            foreach (var entry in listings.Where(e => (category == 0 || e.category == CategoryKeys[category]) && (e.name + " " + e.description + " " + e.author.name + " " + e.author.discord).IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0).ToArray())
             {
+                visibleCount++;
                 GUILayout.Space(6);
-                float rowHeight = gridView ? visible.Skip(row).Take(columns).Max(entry => GridCardHeight(entry, width)) : 0;
-                if (gridView) EditorGUILayout.BeginHorizontal();
-                for (int column = 0; column < columns && row + column < visible.Length; column++)
-                {
-                    if (column > 0) GUILayout.Space(8);
-                    var entry = visible[row + column];
-                    if (gridView) DrawGridCard(entry, GUILayoutUtility.GetRect(width, rowHeight, GUILayout.Width(width), GUILayout.Height(rowHeight)));
-                    else DrawCatalogueCard(entry);
-                }
-                if (gridView)
-                {
-                    GUILayout.FlexibleSpace(); EditorGUILayout.EndHorizontal();
-                    if (visible.Skip(row).Take(columns).Contains(selected)) DrawDetails();
-                }
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+                EditorGUILayout.BeginHorizontal();
+                Rect imageRect = GUILayoutUtility.GetRect(108, 81, GUILayout.Width(108), GUILayout.Height(81));
+                DrawCardPreview(entry, imageRect);
+                EditorGUILayout.BeginVertical();
+                GUILayout.Label(new GUIContent(entry.name, entry.name), cardTitle);
+                GUILayout.Label("By " + entry.author.name + (string.IsNullOrEmpty(entry.author.discord) ? "" : " / " + entry.author.discord), cardAuthor);
+                GUILayout.Space(3);
+                GUILayout.Label(Summary(entry.description), wrapped);
+                EditorGUILayout.EndVertical();
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.BeginHorizontal();
+                using (new EditorGUI.DisabledScope(request != null || ImportReview.Busy || !PluginProtocol.CanImport(entry)))
+                    if (GUILayout.Button("Import into project")) Import(entry);
+                if (GUILayout.Button(selected == entry ? "Hide details" : "Details", GUILayout.Width(92))) selected = selected == entry ? null : entry;
+                EditorGUILayout.EndHorizontal();
+                if (selected == entry) DrawDetails();
+                EditorGUILayout.EndVertical();
             }
-            if (visible.Length == 0 && listings.Count > 0) EditorGUILayout.HelpBox("No contributions match these filters.", MessageType.Info);
-        }
-        internal static int GridColumns(float availableWidth) => Mathf.Max(1, Mathf.FloorToInt((availableWidth + 8) / 268));
-        private void SetLayout(bool grid) { gridView = grid; EditorPrefs.SetString(LayoutPreference, grid ? "grid" : "list"); }
-        private static string Author(Listing entry) => "By " + entry.author.name + (string.IsNullOrEmpty(entry.author.discord) ? "" : " / " + entry.author.discord);
-        private float GridCardHeight(Listing entry, float width)
-        {
-            float contentWidth = width - 12;
-            return 50 + contentWidth / 1.5f + cardTitle.CalcHeight(new GUIContent(entry.name), contentWidth)
-                + cardAuthor.CalcHeight(new GUIContent(Author(entry)), contentWidth)
-                + wrapped.CalcHeight(new GUIContent(Summary(entry.description)), contentWidth);
-        }
-        private void DrawGridCard(Listing entry, Rect rect)
-        {
-            GUI.Box(rect, GUIContent.none, EditorStyles.helpBox);
-            float x = rect.x + 6, y = rect.y + 6, width = rect.width - 12;
-            float height = width / 1.5f;
-            DrawCardPreview(entry, new Rect(x, y, width, height)); y += height + 4;
-            height = cardTitle.CalcHeight(new GUIContent(entry.name), width);
-            GUI.Label(new Rect(x, y, width, height), new GUIContent(entry.name, entry.name), cardTitle); y += height + 2;
-            height = cardAuthor.CalcHeight(new GUIContent(Author(entry)), width);
-            GUI.Label(new Rect(x, y, width, height), Author(entry), cardAuthor); y += height + 4;
-            height = wrapped.CalcHeight(new GUIContent(Summary(entry.description)), width);
-            GUI.Label(new Rect(x, y, width, height), Summary(entry.description), wrapped);
-            using (new EditorGUI.DisabledScope(request != null || ImportReview.Busy || !PluginProtocol.CanImport(entry)))
-                if (GUI.Button(new Rect(x, rect.yMax - 26, width - 96, 20), "Import into project")) Import(entry);
-            if (GUI.Button(new Rect(rect.xMax - 98, rect.yMax - 26, 92, 20), selected == entry ? "Hide details" : "Details")) selected = selected == entry ? null : entry;
-        }
-        private void DrawCatalogueCard(Listing entry)
-        {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.BeginHorizontal();
-            Rect imageRect = GUILayoutUtility.GetRect(108, 81, GUILayout.Width(108), GUILayout.Height(81));
-            DrawCardPreview(entry, imageRect);
-            EditorGUILayout.BeginVertical();
-            GUILayout.Label(new GUIContent(entry.name, entry.name), cardTitle);
-            GUILayout.Label(Author(entry), cardAuthor);
-            GUILayout.Space(3);
-            GUILayout.Label(Summary(entry.description), wrapped);
-            EditorGUILayout.EndVertical();
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.BeginHorizontal();
-            using (new EditorGUI.DisabledScope(request != null || ImportReview.Busy || !PluginProtocol.CanImport(entry)))
-                if (GUILayout.Button("Import into project")) Import(entry);
-            if (GUILayout.Button(selected == entry ? "Hide details" : "Details", GUILayout.Width(92))) selected = selected == entry ? null : entry;
-            EditorGUILayout.EndHorizontal();
-            if (selected == entry) DrawDetails();
-            EditorGUILayout.EndVertical();
+            if (visibleCount == 0 && listings.Count > 0) EditorGUILayout.HelpBox("No contributions match these filters.", MessageType.Info);
         }
         internal static string Summary(string description)
         {

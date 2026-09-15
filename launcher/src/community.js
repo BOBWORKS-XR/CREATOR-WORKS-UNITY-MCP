@@ -6,6 +6,9 @@
   const raw = 'https://raw.githubusercontent.com/SideQuestVR/Creator-Community/main/';
   const invoke = (command, args = {}) => (window.CreatorCommunityInvoke || window.CreatorHubNative.invoke)(command, args);
   let snapshot = null, busy = false, query = '', category = 'all', lastRefresh = 0;
+  const layoutKey = 'creator-plugins.layout.v1';
+  let layout = 'grid';
+  try { if (localStorage.getItem(layoutKey) === 'list') layout = 'list'; } catch { /* Storage may be unavailable in an embedded client. */ }
   const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
   const icon = name => { const node = el('span', `icon icon-${name}`); node.setAttribute('aria-hidden', 'true'); return node; };
   function button(label, className, action, symbol) {
@@ -24,7 +27,18 @@
   const sort = el('select', 'community-sort'); sort.setAttribute('aria-label', 'Sort contributions');
   for (const [value, label] of [['name', 'Name A-Z'], ['author', 'Creator A-Z']]) { const option = el('option', '', label); option.value = value; sort.append(option); }
   const refresh = button('', 'community-icon-button', () => load(true), 'refresh'); refresh.title = 'Refresh catalogue'; refresh.setAttribute('aria-label', 'Refresh catalogue');
-  toolbar.append(search, sort, refresh);
+  const viewModes = el('div', 'community-view-modes'); viewModes.setAttribute('role', 'group'); viewModes.setAttribute('aria-label', 'Catalogue layout');
+  const viewButtons = ['list', 'grid'].map(value => {
+    const label = value === 'grid' ? 'Grid view' : 'List view';
+    const node = button('', 'community-icon-button', () => {
+      layout = value;
+      try { localStorage.setItem(layoutKey, value); } catch { /* Keep the current view usable without storage. */ }
+      applyLayout();
+    }, value === 'grid' ? 'layout-grid' : 'list');
+    node.title = label; node.setAttribute('aria-label', label); node.dataset.layout = value;
+    viewModes.append(node); return node;
+  });
+  toolbar.append(search, sort, viewModes, refresh);
   const filters = el('div', 'community-filters'); filters.setAttribute('role', 'group'); filters.setAttribute('aria-label', 'Contribution type');
   const filterButtons = Object.entries(types).map(([value, label]) => {
     const node = button(label, 'community-filter', () => { category = value; render(); }); node.dataset.category = value; filters.append(node); return node;
@@ -32,6 +46,11 @@
   const summary = el('p', 'community-count'); summary.setAttribute('role', 'status');
   const message = el('p', 'community-message'); message.setAttribute('role', 'status'); message.hidden = true;
   const list = el('div', 'community-list'); list.setAttribute('aria-label', 'Contributions');
+  function applyLayout() {
+    list.dataset.layout = layout;
+    for (const node of viewButtons) node.setAttribute('aria-pressed', String(node.dataset.layout === layout));
+  }
+  applyLayout();
   const footer = el('div', 'community-footer');
   footer.append(el('span', '', 'SideQuest Creator Community'), button('Catalogue on GitHub', 'community-link', () => link('', 'catalogue'), 'external'));
   root.replaceChildren(heading, toolbar, filters, summary, message, list, footer);

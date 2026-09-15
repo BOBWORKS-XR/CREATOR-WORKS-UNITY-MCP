@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import test from 'node:test';
 const root = 'launcher/unity/com.creatorworks.plugins';
 const source = fs.readFileSync(`${root}/Editor/CreatorPluginsWindow.cs`, 'utf8');
 const windowSource = source.slice(source.indexOf('public sealed class CreatorPluginsWindow'));
+const stableRoot = 'launcher/tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins';
 function section(start, end, text = source) {
   const first = text.indexOf(start), last = text.indexOf(end, first + start.length);
   assert.ok(first >= 0 && last > first, `Expected bounded source section: ${start} to ${end}`);
@@ -19,21 +21,36 @@ test('all embedded helper files survive Windows and Unix checkout byte-for-byte'
   const git = args => execFileSync('git', args, { cwd: fixture, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     const files = ['Editor/CreatorPluginsWindow.cs', 'Editor/CreatorWorks.Plugins.Editor.asmdef', 'LICENSE.md', 'package.json'];
-    fs.mkdirSync(path.join(fixture, root, 'Editor'), { recursive: true });
+    const roots = [root, 'launcher/tests/fixtures/helper-alpha8/unity/com.creatorworks.plugins', stableRoot];
     fs.copyFileSync('.gitattributes', path.join(fixture, '.gitattributes'));
-    for (const file of files) fs.copyFileSync(`${root}/${file}`, path.join(fixture, root, file));
+    for (const directory of roots) {
+      fs.mkdirSync(path.join(fixture, directory, 'Editor'), { recursive: true });
+      for (const file of files) fs.copyFileSync(`${directory}/${file}`, path.join(fixture, directory, file));
+    }
     git(['init', '--quiet']);
-    git(['-c', 'core.autocrlf=false', 'add', '--', '.gitattributes', root]);
-    for (const file of files) {
-      const relative = `${root}/${file}`;
+    git(['-c', 'core.autocrlf=false', 'add', '--', '.gitattributes', ...roots]);
+    for (const directory of roots) for (const file of files) {
+      const relative = `${directory}/${file}`;
       const expected = fs.readFileSync(relative);
-      assert.deepEqual(git(['show', `:${relative}`]), expected, `${file}: index bytes`);
+      assert.deepEqual(git(['show', `:${relative}`]), expected, `${relative}: index bytes`);
       for (const autocrlf of ['false', 'true']) {
-        assert.deepEqual(git(['-c', `core.autocrlf=${autocrlf}`, 'cat-file', '--filters', `:${relative}`]), expected, `${file}: autocrlf=${autocrlf}`);
+        assert.deepEqual(git(['-c', `core.autocrlf=${autocrlf}`, 'cat-file', '--filters', `:${relative}`]), expected, `${relative}: autocrlf=${autocrlf}`);
       }
     }
   } finally {
     fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('stable helper fixture preserves the exact four-file MCP 2.7.0 payload', () => {
+  const hashes = {
+    'package.json': 'b9624dfda50c815913ee4e3555c3b5abcfdfc3a557c7eaf3bcb2061dbde08faf',
+    'LICENSE.md': '7e1bc8fb937a3324de67fb2439b8e943dda3efc6b62684da2697e1bfcfe7414e',
+    'Editor/CreatorWorks.Plugins.Editor.asmdef': '4af0449cdb8f192a2a0ec8498db78790cf9f185e08fb9bac95c237ad7e152a5d',
+    'Editor/CreatorPluginsWindow.cs': 'eb62f266835bf42814c3decc224197cb74842fc316428390645d314ca28243a7'
+  };
+  for (const [file, hash] of Object.entries(hashes)) {
+    assert.equal(createHash('sha256').update(fs.readFileSync(`${stableRoot}/${file}`)).digest('hex'), hash, file);
   }
 });
 

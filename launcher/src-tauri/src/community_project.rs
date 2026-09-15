@@ -22,6 +22,13 @@ const LEGACY_HASHES: &[&str] = &[
     "4af0449cdb8f192a2a0ec8498db78790cf9f185e08fb9bac95c237ad7e152a5d",
     "d7ebb4482f1194a51ad85789f11b60e9525a310b3d3b3893d9624bd22b4aa85a",
 ];
+// Exact helper shipped in Hub 0.1.0, Setup 0.3.0 and MCP 2.7.0.
+const STABLE_HASHES: &[&str] = &[
+    "b9624dfda50c815913ee4e3555c3b5abcfdfc3a557c7eaf3bcb2061dbde08faf",
+    "7e1bc8fb937a3324de67fb2439b8e943dda3efc6b62684da2697e1bfcfe7414e",
+    "4af0449cdb8f192a2a0ec8498db78790cf9f185e08fb9bac95c237ad7e152a5d",
+    "eb62f266835bf42814c3decc224197cb74842fc316428390645d314ca28243a7",
+];
 const FILES: &[(&str, &[u8])] = &[
     (
         "package.json",
@@ -177,14 +184,17 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
     }
     let mut current = true;
     let mut legacy = true;
-    for ((name, expected), legacy_hash) in FILES.iter().zip(LEGACY_HASHES) {
+    let mut stable = true;
+    for (index, (name, expected)) in FILES.iter().enumerate() {
         let Ok(bytes) = read(&destination.join(name), 256 * 1024) else {
             return Ok("different");
         };
         current &= bytes == *expected;
-        legacy &= digest(&bytes) == *legacy_hash;
+        let hash = digest(&bytes);
+        legacy &= hash == LEGACY_HASHES[index];
+        stable &= hash == STABLE_HASHES[index];
     }
-    if !current && !legacy {
+    if !current && !legacy && !stable {
         return Ok("different");
     }
     let mut pending = vec![destination.to_path_buf()];
@@ -985,6 +995,58 @@ fn status(target: &Target, request_id: &str) -> Result<Outcome, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const STABLE_FILES: &[(&str, &[u8])] = &[
+        ("package.json", include_bytes!("../../tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins/package.json")),
+        ("LICENSE.md", include_bytes!("../../tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins/LICENSE.md")),
+        ("Editor/CreatorWorks.Plugins.Editor.asmdef", include_bytes!("../../tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins/Editor/CreatorWorks.Plugins.Editor.asmdef")),
+        ("Editor/CreatorPluginsWindow.cs", include_bytes!("../../tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins/Editor/CreatorPluginsWindow.cs")),
+    ];
+    #[test]
+    fn stable_helper_grid_upgrade_preserves_backup_and_refuses_modified_or_mixed_files() {
+        for mutation in ["none", "modified", "mixed"] {
+            let temp = tempfile::tempdir().unwrap();
+            project(temp.path());
+            for ((name, bytes), hash) in STABLE_FILES.iter().zip(STABLE_HASHES) {
+                assert_eq!(digest(bytes), *hash, "stable fixture changed: {name}");
+                save_new(&temp.path().join(PACKAGE).join(name), bytes).unwrap();
+            }
+            let package = temp.path().join(PACKAGE);
+            save_new(&package.join("Editor.meta"), b"guid: stable-folder\n").unwrap();
+            if mutation == "modified" {
+                fs::write(package.join("Editor/CreatorPluginsWindow.cs"), "user edits").unwrap();
+            } else if mutation == "mixed" {
+                fs::write(package.join("package.json"), OLD_FILES[0].1).unwrap();
+            }
+            let before = helper_snapshot(&package).unwrap();
+            let target = inspect(temp.path()).unwrap();
+            if mutation == "none" {
+                assert_eq!(target.helper, "outdated");
+                install(&target).unwrap();
+                assert_eq!(helper_state(temp.path()).unwrap(), "installed");
+                let backups: Vec<_> = fs::read_dir(area(temp.path(), "helper-backups").unwrap())
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect();
+                assert_eq!(backups.len(), 1);
+                assert_eq!(
+                    helper_snapshot(&backups[0].path().join("com.creatorworks.plugins")).unwrap(),
+                    before
+                );
+                assert_eq!(
+                    fs::read(package.join("Editor.meta")).unwrap(),
+                    b"guid: stable-folder\n"
+                );
+                assert_eq!(
+                    fs::read_to_string(temp.path().join("Assets/Manual.unity")).unwrap(),
+                    "manually arranged scene"
+                );
+            } else {
+                assert_eq!(target.helper, "different");
+                assert!(install(&target).is_err());
+                assert_eq!(helper_snapshot(&package).unwrap(), before);
+            }
+        }
+    }
     const OLD_FILES: &[(&str, &[u8])] = &[
         ("package.json", include_bytes!("../../tests/fixtures/helper-alpha8/unity/com.creatorworks.plugins/package.json")),
         ("LICENSE.md", include_bytes!("../../tests/fixtures/helper-alpha8/unity/com.creatorworks.plugins/LICENSE.md")),

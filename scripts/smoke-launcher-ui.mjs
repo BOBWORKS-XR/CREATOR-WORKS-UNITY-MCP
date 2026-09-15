@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const output = path.join(root, 'artifacts', 'launcher-ui');
+const output = path.resolve(process.env.LAUNCHER_UI_ARTIFACTS || path.join(root, 'artifacts', 'launcher-ui'));
 await fs.mkdir(output, { recursive: true });
 const files = new Map([
   ['/', ['index.html', 'text/html']], ['/index.html', ['index.html', 'text/html']],
@@ -25,6 +25,8 @@ const files = new Map([
   ['/icons/folder-open.svg', ['icons/folder-open.svg', 'image/svg+xml']],
   ['/icons/refresh-cw.svg', ['icons/refresh-cw.svg', 'image/svg+xml']],
   ['/icons/download.svg', ['icons/download.svg', 'image/svg+xml']],
+  ['/icons/layout-grid.svg', ['icons/layout-grid.svg', 'image/svg+xml']],
+  ['/icons/list.svg', ['icons/list.svg', 'image/svg+xml']],
   ['/updates.js', ['updates.js', 'text/javascript']], ['/creator-works-logo.png', ['creator-works-logo.png', 'image/png']],
   ['/sidequest-mark-white.svg', ['sidequest-mark-white.svg', 'image/svg+xml']],
   ['/icons/external-link.svg', ['icons/external-link.svg', 'image/svg+xml']]
@@ -468,6 +470,28 @@ try {
   await toggle.click();
   await page.locator('[data-local-view="plugins"]').click();
   await page.waitForFunction(() => document.querySelectorAll('.community-item').length === 2 && !document.querySelector('[data-community-download]').disabled);
+  const catalogueList = page.locator('.community-list');
+  const gridView = page.getByRole('button', {name:'Grid view',exact:true});
+  const listView = page.getByRole('button', {name:'List view',exact:true});
+  assert.equal(await catalogueList.getAttribute('data-layout'), 'grid');
+  assert.equal(await gridView.getAttribute('aria-pressed'), 'true');
+  const initialCalls = await page.evaluate(() => fixture.calls.length);
+  await listView.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await listView.getAttribute('aria-pressed'), 'true');
+  assert.equal(await gridView.getAttribute('aria-pressed'), 'false');
+  assert.equal(await page.evaluate(() => localStorage.getItem('creator-plugins.layout.v1')), 'list');
+  await page.locator('[aria-label="Search contributions"]').fill('Download test');
+  await page.locator('.community-details summary').click();
+  await page.evaluate(() => { window.keptPlugin = document.querySelector('.community-item'); });
+  await gridView.focus();
+  await page.keyboard.press('Space');
+  assert.equal(await catalogueList.getAttribute('data-layout'), 'grid');
+  assert.equal(await page.locator('[aria-label="Search contributions"]').inputValue(), 'Download test');
+  assert.ok(await page.evaluate(() => keptPlugin === document.querySelector('.community-item') && keptPlugin.querySelector('details').open));
+  assert.equal(await page.evaluate(() => fixture.calls.length), initialCalls);
+  await page.locator('[aria-label="Search contributions"]').fill('');
+  checks.push('Grid default; keyboard List/Grid toggle persists preference without IPC, lost search or replaced open details');
   assert.match(await page.locator('[data-id="egon-gb.start-location"]').innerText(), /Mr\. E \/ egon\.gb/);
   assert.equal(await page.locator('[data-id="egon-gb.start-location"] [data-community-download]').count(), 0);
   const addUnityMenu = page.getByRole('button', {name:'Add Unity menu',exact:true,includeHidden:true});
@@ -501,6 +525,37 @@ try {
   });
   await page.getByRole('button', {name:'Refresh catalogue',exact:true}).click();
   await page.waitForFunction(() => document.querySelectorAll('.community-item').length === 4);
+  await page.evaluate(() => {
+    window.savedPluginEntries = structuredClone(fixture.community.entries);
+    fixture.community.entries[1].name = 'VeryLongContributionName'.repeat(6);
+    fixture.community.entries[1].author.name = 'LongAuthorName'.repeat(5);
+    fixture.community.entries[1].description = 'A longer fixture description that must wrap and leave the actions accessible. '.repeat(7);
+  });
+  await page.getByRole('button', {name:'Refresh catalogue',exact:true}).click();
+  await page.waitForFunction(() => !document.querySelector('[aria-label="Refresh catalogue"]').disabled);
+  for (const mode of ['grid', 'list']) {
+    await (mode === 'grid' ? gridView : listView).click();
+    for (const width of [1200,900,560,390,320]) {
+      await page.setViewportSize({width,height:800});
+      const bounds = await page.locator('.community-item').evaluateAll(items => items.map(item => {
+        const rect = item.getBoundingClientRect(), actions = item.querySelector('.community-item-actions').getBoundingClientRect();
+        const description = item.querySelector('.community-description').getBoundingClientRect();
+        return {top:rect.top,bottom:rect.bottom,left:rect.left,right:rect.right,scroll:item.scrollWidth,width:item.clientWidth,
+          actionTop:actions.top,actionBottom:actions.bottom,descriptionBottom:description.bottom};
+      }));
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${mode} ${width}: page overflow`);
+      for (const box of bounds) assert.ok(box.scroll <= box.width && box.left >= 0 && box.right <= width && box.actionTop >= box.descriptionBottom && box.actionBottom <= box.bottom, `${mode} ${width}: card overlap`);
+      if (mode === 'grid') for (const box of bounds) for (const peer of bounds.filter(peer => Math.abs(peer.top - box.top) < 1)) {
+        assert.ok(Math.abs(box.bottom - peer.bottom) < 1, 'Grid row heights differ');
+      }
+      await page.screenshot({path:path.join(output,`plugins-${mode}-long-${width}.png`),fullPage:true});
+    }
+  }
+  await page.evaluate(() => { fixture.community.entries = savedPluginEntries; });
+  await page.getByRole('button', {name:'Refresh catalogue',exact:true}).click();
+  await page.waitForFunction(() => !document.querySelector('[aria-label="Refresh catalogue"]').disabled);
+  await gridView.click();
+  checks.push('List/Grid responsive long-name cards at 1200/900/560/390/320px; equal grid row heights and visible nonoverlapping actions');
   for (const [category, id] of [['mcp-tool','fixture.mcp-tool'], ['ai-skill','fixture.ai-skill']]) {
     await page.locator(`[data-category="${category}"]`).click();
     assert.equal(await page.locator('.community-item').count(), 1);
@@ -606,6 +661,13 @@ try {
   checks.push('Project picker and install/queue/status modal: pending/open-project blocking, ID-only requests, native workflow exclusion, busy Escape lock, cancelled picker, queued-versus-imported wording and 900/560/390px long-path layouts');
   await page.locator('[data-id="fixture.download"] [data-community-download]').click();
   await page.waitForFunction(() => typeof fixture.gates.download === 'function');
+  const pendingCalls = await page.evaluate(() => fixture.calls.length);
+  await page.evaluate(() => { window.pendingDownloadButton = document.querySelector('[data-community-download]'); });
+  await listView.click();
+  await gridView.click();
+  assert.ok(await page.evaluate(() => pendingDownloadButton === document.querySelector('[data-community-download]') && pendingDownloadButton.disabled));
+  assert.equal(await page.evaluate(() => fixture.calls.length), pendingCalls);
+  checks.push('Switching layout during download preserves the same disabled button and issues no extra IPC');
   await toggle.click();
   await page.locator('[data-local-view="mcp"]').click();
   assert.equal(await page.locator('#workspaceControls').evaluate(el => el.disabled), true);
@@ -630,6 +692,31 @@ try {
   assert.equal(await page.evaluate(() => JSON.stringify(fixture.config)), configBeforePlugins);
   assert.equal(await page.evaluate(() => fixture.calls.filter(c => c.name === 'download_community_package').length), 1);
   checks.push('Plugins lazy loading, initial download readiness, pending review, author credit, filters, 900/560/390px layouts, preserved drafts, download workflow exclusion and stale/offline refusal');
+  await listView.click();
+  await page.reload();
+  await ready();
+  assert.equal(await catalogueList.getAttribute('data-layout'), 'list');
+  for (const [stored, expected] of [[null,'grid'], ['grid','grid'], ['list','list'], ['invalid','grid'], ['unavailable','grid']]) {
+    const isolated = await context.newPage();
+    isolated.on('pageerror', error => failures.push(error.message));
+    await isolated.addInitScript(value => {
+      if (value === 'unavailable') {
+        Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('Storage blocked', 'SecurityError'); } });
+      } else if (value === null) localStorage.removeItem('creator-plugins.layout.v1');
+      else localStorage.setItem('creator-plugins.layout.v1', value);
+    }, stored);
+    await isolated.goto(base);
+    await isolated.waitForFunction(() => document.querySelector('.community-list')?.dataset.layout);
+    assert.equal(await isolated.locator('.community-list').getAttribute('data-layout'), expected, `stored=${stored}`);
+    await isolated.locator('#appSwitcherToggle').click();
+    await isolated.locator('[data-local-view="plugins"]').click();
+    await isolated.waitForFunction(() => document.querySelectorAll('.community-item').length === 2);
+    await isolated.getByRole('button',{name:'List view',exact:true}).click();
+    await isolated.getByRole('button',{name:'Grid view',exact:true}).click();
+    assert.equal(await isolated.locator('.community-list').getAttribute('data-layout'), 'grid');
+    await isolated.close();
+  }
+  checks.push('Explicit List survives reload; fresh/invalid/blocked storage uses Grid and both modes remain usable');
   await fs.writeFile(path.join(output,'motion-results.json'),JSON.stringify({motion,reversed,short,reduced},null,2) + '\n');
   assert.deepEqual(failures,[]);
   const report = {success:true, checks, limitations:'Mocked browser/Tauri only. No native GUI, real setup, install or Unity runtime actions performed.'};

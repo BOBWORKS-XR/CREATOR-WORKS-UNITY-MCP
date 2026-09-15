@@ -19,6 +19,9 @@ The complete notice is included at `launcher/src/icons/LICENSE-lucide` alongside
 the assets. No icon runtime dependency is added. The cube bitmap remains the
 existing Creator Works logo.
 
+The shared `layout-grid` and `list` SVGs are unmodified icons from the official
+Lucide repository and use the same included licence notices.
+
 The shared `creator-plugins.png` bitmap is approved AI-generated artwork prepared
 for Creator Suite, shared unchanged by Hub, Setup and MCP. It is not a Lucide
 asset; the Lucide notices above apply to the separate interface icons.
