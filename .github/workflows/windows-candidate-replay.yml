@@ -5,6 +5,8 @@ on:
     branches: [feature/community-plugins]
     paths:
       - .github/workflows/windows-candidate-replay.yml
+      - scripts/smoke-native-lifecycle-ci.mjs
+      - test/fixtures/native-lifecycle-window.ps1
 permissions:
   contents: read
   actions: read

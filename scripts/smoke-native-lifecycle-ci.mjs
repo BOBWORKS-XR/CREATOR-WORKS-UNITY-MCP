@@ -26,7 +26,9 @@ async function wait(fn, milliseconds = 30000) {
   throw error ?? Error('Native lifecycle deadline expired.');
 }
 function native(action = 'state') {
-  return JSON.parse(execFileSync('powershell.exe', ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.resolve('test/fixtures/native-lifecycle-window.ps1'),'-TargetPid',String(child.pid),'-Executable',executable,'-Action',action], { windowsHide: true, encoding: 'utf8', timeout: 15000 }));
+  // The workflow is hosted by PowerShell 7; keep its module environment in the same shell.
+  const shell = path.join(process.env.ProgramFiles, 'PowerShell', '7', 'pwsh.exe');
+  return JSON.parse(execFileSync(shell, ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.resolve('test/fixtures/native-lifecycle-window.ps1'),'-TargetPid',String(child.pid),'-Executable',executable,'-Action',action], { windowsHide: true, encoding: 'utf8', timeout: 15000 }));
 }
 let browser, page, lease;
 try {
