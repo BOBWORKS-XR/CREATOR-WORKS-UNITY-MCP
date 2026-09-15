@@ -10,11 +10,14 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(path.resolve('artifacts/lifecycle-tools/node_modules/@playwright/test'));
 const executable = path.resolve('artifacts/lifecycle-payload/creator-works-mcp-launcher.exe');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const sha256 = 'a35414684d943d214f9584d79debbb64db8e482489bc3c40fafc02368e9fb1dc';
+const sha256 = process.env.CANDIDATE_EXECUTABLE_SHA256;
+const sourceCommit = process.env.CANDIDATE_SOURCE;
+assert.match(sha256 ?? '', /^[a-f0-9]{64}$/, 'A reviewed executable hash is required.');
+assert.match(sourceCommit ?? '', /^[a-f0-9]{40}$/, 'A reviewed source commit is required.');
 assert.equal(hash(executable), sha256);
 const out = path.resolve('artifacts/native-lifecycle');
 fs.mkdirSync(out, { recursive: true });
-const report = { passed: false, executableSha256: sha256, sourceCommit: '8caf8a818ff5654dc255ab2c02fcf7c21525e7d5', acceptanceCommit: process.env.GITHUB_SHA, checks: [], productionUserMachineUsed: false };
+const report = { passed: false, executableSha256: sha256, sourceCommit, acceptanceCommit: process.env.GITHUB_SHA, checks: [], productionUserMachineUsed: false };
 const child = spawn(executable, [], { windowsHide: true, stdio: 'ignore', env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9239', WEBVIEW2_USER_DATA_FOLDER: path.join(out, 'webview') } });
 child.on('error', error => { report.launchError = String(error); });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -28,13 +31,43 @@ async function wait(fn, milliseconds = 30000) {
 function native(action = 'state') {
   // The workflow is hosted by PowerShell 7; keep its module environment in the same shell.
   const shell = path.join(process.env.ProgramFiles, 'PowerShell', '7', 'pwsh.exe');
-  return JSON.parse(execFileSync(shell, ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.resolve('test/fixtures/native-lifecycle-window.ps1'),'-TargetPid',String(child.pid),'-Executable',executable,'-Action',action], { windowsHide: true, encoding: 'utf8', timeout: 15000 }));
+  return JSON.parse(execFileSync(shell, ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.resolve('test/fixtures/native-lifecycle-window.ps1'),'-TargetPid',String(child.pid),'-Executable',executable,'-ExpectedSha256',sha256,'-Action',action], { windowsHide: true, encoding: 'utf8', timeout: 15000 }));
 }
 let browser, page, lease;
 try {
   browser = await wait(() => chromium.connectOverCDP('http://127.0.0.1:9239'), 60000);
   page = await wait(() => { const found = browser.contexts().flatMap(c => c.pages()).find(p => p.url().includes('tauri.localhost')); assert.ok(found); return found; });
   await page.waitForFunction(() => window.CreatorRuntime?.ready && window.__TAURI__?.core?.invoke);
+  await page.locator('#appSwitcherToggle').click();
+  await page.locator('[data-local-view="plugins"]').waitFor({ state: 'visible' });
+  const logo = await page.locator('[data-local-view="plugins"] img').evaluate(async img => {
+    await img.decode();
+    const response = await fetch(img.src);
+    if (!response.ok) throw new Error('Packaged logo could not be read.');
+    const bytes = await response.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 30;
+    const context = canvas.getContext('2d'); context.drawImage(img, 0, 0, 30, 30);
+    const data = context.getImageData(0, 0, 30, 30).data;
+    const pixels = { transparent: 0, visible: 0, cyan: 0, red: 0 };
+    for (let i = 0; i < data.length; i += 4) {
+      const [r, g, b, a] = data.subarray(i, i + 4);
+      if (a === 0) pixels.transparent++;
+      if (a > 128) {
+        pixels.visible++;
+        if (b > 100 && g > 100 && r < 80) pixels.cyan++;
+        if (r > 150 && g < 130 && b < 130) pixels.red++;
+      }
+    }
+    return { sha256: Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join(''), width: img.naturalWidth, height: img.naturalHeight, renderedWidth: img.width, pixels };
+  });
+  assert.equal(logo.sha256, 'ff107f1c0bca0380f35f25754fd023d60311fa4457f6fd84255a8f41f78fee6d');
+  assert.equal(logo.width, 256); assert.equal(logo.height, 256); assert.equal(logo.renderedWidth, 30);
+  assert.ok(logo.pixels.transparent > 100 && logo.pixels.visible > 100 && logo.pixels.cyan > 3 && logo.pixels.red > 3);
+  report.logo = logo;
+  await page.screenshot({ path: path.join(out, 'approved-logo-menu.png') });
+  await page.keyboard.press('Escape');
+  report.checks.push('Exact packaged app serves the approved PNG hash and renders transparent cyan/red artwork at menu size.');
   lease = await wait(() => page.evaluate(() => window.__TAURI__.core.invoke('begin_ui_operation')), 60000);
   await page.evaluate(async () => { window.nativeCloseRefusals = 0; await window.CreatorRuntime.listen('creator-lifecycle-close-blocked', () => window.nativeCloseRefusals++); });
   const busy = native(); assert.equal(busy.protocol, 1); assert.equal(busy.busy, 1); assert.equal(busy.closing, 0);

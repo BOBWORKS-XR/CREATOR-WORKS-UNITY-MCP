@@ -1,9 +1,14 @@
-param([Parameter(Mandatory=$true)][int]$TargetPid, [Parameter(Mandatory=$true)][string]$Executable, [ValidateSet('state','close')][string]$Action = 'state')
+param(
+    [Parameter(Mandatory=$true)][int]$TargetPid,
+    [Parameter(Mandatory=$true)][string]$Executable,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{64}$')][string]$ExpectedSha256,
+    [ValidateSet('state','close')][string]$Action = 'state'
+)
 $ErrorActionPreference='Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') { throw 'Native lifecycle acceptance requires a disposable GitHub-hosted Windows runner.' }
 $process = Get-Process -Id $TargetPid -ErrorAction Stop
 if ([IO.Path]::GetFullPath($process.Path) -ine [IO.Path]::GetFullPath($Executable)) { throw 'Native lifecycle process identity changed.' }
-if ((Get-FileHash -LiteralPath $Executable).Hash.ToLowerInvariant() -ne 'a35414684d943d214f9584d79debbb64db8e482489bc3c40fafc02368e9fb1dc') { throw 'Unapproved lifecycle executable.' }
+if ((Get-FileHash -LiteralPath $Executable).Hash.ToLowerInvariant() -cne $ExpectedSha256) { throw 'Unapproved lifecycle executable.' }
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;

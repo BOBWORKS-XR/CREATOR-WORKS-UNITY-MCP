@@ -42,9 +42,10 @@ test('stable and alpha upgrades test one build before exposing the accepted cand
 
 test('candidate replay pins the original build and never rebuilds or publishes it', () => {
   const workflow = readFileSync('.github/workflows/windows-candidate-replay.yml', 'utf8');
-  assert.match(workflow, /34999537564/);
-  assert.match(workflow, /8caf8a818ff5654dc255ab2c02fcf7c21525e7d5/);
-  assert.match(workflow, /762258ab39822d38d67810b8fda3b51cd017503178a23d08ecfb340f92282c77/);
+  assert.match(workflow, /35003567089/);
+  assert.match(workflow, /5b65478f126a9cf89c07b6136309d57f7782e40d/);
+  assert.match(workflow, /f403da14237a16d3e7a50620d484c60c0a3fbdbb6abfe1ccaf21e4ffb78e1da9/);
+  assert.match(workflow, /CANDIDATE_EXECUTABLE_SHA256: '0fc9f6023973378778a00b063c383f37f2973eec9d89a96b084391c89f2287cd'/);
   assert.match(workflow, /accepted-candidate:\s+needs: \[upgrade, lifecycle\]/);
   assert.doesNotMatch(workflow, /cargo build|tauri.*build|gh release|contents: write/);
   const diagnostic = readFileSync('scripts/test-installed-upgrade-ci.ps1', 'utf8');
@@ -62,6 +63,26 @@ test('installed-upgrade CI harness refuses a local machine before resolving inst
   assert.ifError(result.error);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /restricted to a disposable GitHub-hosted Windows runner/);
+});
+
+test('native lifecycle driver and window helper refuse local execution before accessing app state', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const env = { ...process.env, GITHUB_ACTIONS: 'false', RUNNER_ENVIRONMENT: 'self-hosted' };
+  const driver = spawnSync(process.execPath, ['scripts/smoke-native-lifecycle-ci.mjs'], {
+    encoding: 'utf8', windowsHide: true, timeout: 10_000, env,
+  });
+  assert.ifError(driver.error);
+  assert.notEqual(driver.status, 0);
+  assert.match(driver.stderr, /Native lifecycle acceptance requires a disposable GitHub-hosted Windows runner/);
+  const helper = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File',
+    path.resolve('test/fixtures/native-lifecycle-window.ps1'), '-TargetPid', '1',
+    '-Executable', 'must-not-be-opened.exe', '-ExpectedSha256', '0'.repeat(64)], {
+    encoding: 'utf8', windowsHide: true, timeout: 10_000, env,
+  });
+  assert.ifError(helper.error);
+  assert.notEqual(helper.status, 0);
+  assert.match(helper.stderr, /Native lifecycle acceptance requires a disposable GitHub-hosted Windows runner/);
 });
 
 test('Windows PowerShell preserves installer paths and refuses locked/running targets without changes', {
