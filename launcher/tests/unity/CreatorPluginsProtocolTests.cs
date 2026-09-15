@@ -14,6 +14,11 @@ internal static class CreatorPluginsProtocolTests
         try
         {
             string project = Path.GetFullPath(args[0]); Directory.CreateDirectory(project);
+            if (args.Length > 1) count += CreatorPluginsLockTests.Run(project, args[1]);
+            Check(PluginProtocol.ReceiptMessage("line1\r\nline2\rline3\t\u0000") == "line1\nline2\nline3\t ", "Failure receipt did not normalize Windows errors.");
+            Check(PluginProtocol.Text(PluginProtocol.ReceiptMessage(null), 4000), "Missing callback message creates an invalid receipt.");
+            Check(PluginProtocol.ReceiptMessage(new string('x', 4001)).Length == 4000, "Receipt message exceeds its shared bound.");
+            Check(PluginProtocol.ReceiptMessage(new string('x', 3999) + "\ud83d\ude00").Length == 3999, "Receipt bound split a surrogate pair.");
             byte[] data = Encoding.ASCII.GetBytes("fixture");
             string hash; using (var stream = new MemoryStream(data)) hash = PluginProtocol.Hash(stream);
             var request = new ImportRequest { requestId = new string('a', 32), projectPath = project, packageId = "fixture.package", version = "1.0.0", name = "Fixture", byteLength = data.Length, sha256 = hash, packageFile = hash + ".unitypackage" };

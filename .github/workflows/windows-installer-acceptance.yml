@@ -102,10 +102,13 @@ jobs:
     needs: build-candidate
     runs-on: windows-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
-        baseline: ['2.6.0', '2.7.0-alpha.1']
+        baseline: ['2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -115,6 +118,14 @@ jobs:
         with:
           name: mcp-windows-candidate-under-test
           path: launcher/src-tauri/target/release/bundle/nsis
+      - name: Fetch the previously accepted alpha 2 baseline
+        if: matrix.baseline == '2.7.0-alpha.2'
+        uses: actions/download-artifact@v4
+        with:
+          name: mcp-windows-prerelease-candidate
+          run-id: 34985053768
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts/accepted-alpha2-baseline
       - name: Native installed upgrade on disposable runner only
         shell: powershell
         env:
@@ -122,7 +133,9 @@ jobs:
           BASELINE_VERSION: ${{ matrix.baseline }}
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          .\scripts\test-installed-upgrade-ci.ps1 -Installer "launcher\src-tauri\target\release\bundle\nsis\Creator Works MCP_${version}_x64-setup.exe" -BaselineVersion $env:BASELINE_VERSION -ExpectedInstallerSha256 $env:EXPECTED_INSTALLER_SHA256
+          $extra = @{}
+          if ($env:BASELINE_VERSION -ceq '2.7.0-alpha.2') { $extra.BaselineInstaller = 'artifacts\accepted-alpha2-baseline\Creator Works MCP_2.7.0-alpha.2_x64-setup.exe' }
+          .\scripts\test-installed-upgrade-ci.ps1 -Installer "launcher\src-tauri\target\release\bundle\nsis\Creator Works MCP_${version}_x64-setup.exe" -BaselineVersion $env:BASELINE_VERSION -ExpectedInstallerSha256 $env:EXPECTED_INSTALLER_SHA256 @extra
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -149,6 +162,6 @@ jobs:
           if ((Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:EXPECTED_INSTALLER_SHA256) { throw 'Accepted installer changed.' }
       - uses: actions/upload-artifact@v4
         with:
-          name: mcp-windows-prerelease-candidate
+          name: mcp-windows-stable-candidate
           path: accepted/*-setup.exe
           if-no-files-found: error

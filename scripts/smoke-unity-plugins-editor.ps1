@@ -18,6 +18,7 @@ New-Item -ItemType Directory -Path $scripts, $packages, $settings -Force | Out-N
 [IO.File]::WriteAllText((Join-Path $settings 'ProjectVersion.txt'), "m_EditorVersion: $UnityVersion`n")
 Copy-Item -LiteralPath (Join-Path $root 'launcher\unity\com.creatorworks.plugins') -Destination $packages -Recurse
 Copy-Item -LiteralPath (Join-Path $root 'launcher\tests\unity\CreatorPluginsEditorSmoke.cs'), (Join-Path $root 'launcher\tests\unity\CreatorWorks.Plugins.Editor.Tests.asmdef') -Destination $scripts
+Copy-Item -LiteralPath (Join-Path $root 'launcher\tests\unity\CreatorPluginsQueueTests.cs') -Destination $scripts
 Copy-Item -LiteralPath (Join-Path $root 'launcher\tests\fixtures\community\start-location.json') -Destination (Join-Path $fixture 'pending-listing.json')
 $implicit = Get-Content -LiteralPath (Join-Path $fixture 'pending-listing.json') -Raw | ConvertFrom-Json
 $implicit.PSObject.Properties.Remove('reviewStatus')

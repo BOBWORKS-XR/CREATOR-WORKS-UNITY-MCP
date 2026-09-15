@@ -19,6 +19,10 @@ The complete notice is included at `launcher/src/icons/LICENSE-lucide` alongside
 the assets. No icon runtime dependency is added. The cube bitmap remains the
 existing Creator Works logo.
 
+The shared `creator-plugins.svg` mark combines the Creator suite cube with an
+adaptation of Lucide's puzzle silhouette from the same version. Attribution is
+retained in the SVG; the full ISC notice is bundled in `LICENSE-lucide`.
+
 The unmodified white SideQuest mark at `launcher/src/sidequest-mark-white.svg`
 identifies SideQuest's future Creator Converter. Source: the official
 [SideQuest branding page](https://sidequestvr.com/branding),

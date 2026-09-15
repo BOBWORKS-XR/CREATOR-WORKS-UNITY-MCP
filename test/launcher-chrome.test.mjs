@@ -65,6 +65,18 @@ test('Converter remains disabled while Plugins opens the local catalogue', () =>
   assert.match(chrome, /if \(item.getAttribute\('aria-disabled'\) === 'true'\) return/);
 });
 
+test('Plugins uses the shared attributed cube/puzzle mark', () => {
+  const entry = html.slice(html.indexOf('data-local-view="plugins"'), html.indexOf('</button>', html.indexOf('data-local-view="plugins"')));
+  assert.match(entry, /src="icons\/creator-plugins.svg"/);
+  assert.doesNotMatch(entry, /app-letter/);
+  const icon = fs.readFileSync('launcher/src/icons/creator-plugins.svg', 'utf8');
+  assert.match(icon, /lucide-static v1\.44\.0 \(ISC\)/);
+  assert.match(icon, /#00cce8/);
+  assert.match(icon, /#ff4d4d/);
+  assert.doesNotMatch(icon, /<script|<foreignObject|href="https?:/i);
+  assert.match(fs.readFileSync('THIRD_PARTY_NOTICES.md', 'utf8'), /creator-plugins\.svg/);
+});
+
 test('result-returning community operations retain the existing workflow guard', async () => {
   const f = fixture();
   f.context.action = async () => 'saved fixture';

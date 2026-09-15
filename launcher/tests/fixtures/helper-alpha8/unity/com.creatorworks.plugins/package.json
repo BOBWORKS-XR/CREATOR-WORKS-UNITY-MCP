@@ -1,8 +1,8 @@
 {
   "name": "com.creatorworks.plugins",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "displayName": "Creator Plugins",
-  "description": "Optional Editor-only community catalogue and explicit Unity package imports.",
+  "description": "Optional Editor-only community catalogue and explicit package import review.",
   "unity": "2022.3",
   "author": { "name": "Creator Works" },
   "license": "MIT"

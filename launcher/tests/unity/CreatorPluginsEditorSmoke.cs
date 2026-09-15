@@ -45,6 +45,7 @@ public static class CreatorPluginsEditorSmoke
             Check(!File.Exists(PluginProtocol.Area(project, "active-review.json")), "An active import was created without consent.");
             Check(!File.Exists(Path.Combine(Application.dataPath, "No import fixture")), "Queue wrote to Assets.");
             Check(typeof(CreatorPluginsWindow).Assembly.GetName().Name == "CreatorWorks.Plugins.Editor", "Helper asmdef was not loaded.");
+            checks += CreatorPluginsQueueTests.Run(Path.Combine(project, "queue-fixtures"));
             // Seed an interrupted review fixture, not a real import, for a second Editor process.
             PluginProtocol.SaveNew(project, "active-review.json", Encoding.UTF8.GetBytes(JsonUtility.ToJson(loaded)));
             Check(ImportReview.Receipt(loaded).status == "review", "Review must be derived from the durable active request.");
@@ -91,6 +92,15 @@ public static class CreatorPluginsEditorSmoke
             method.Invoke(null, new object[] { pending.sha256, "imported", "Duplicate callback must do nothing" });
             for (int n = 0; n < 100; n++) ImportReview.Acknowledge(pending);
             Check(Convert.ToBase64String(File.ReadAllBytes(finalPath)) == Convert.ToBase64String(finalBytes) && File.GetLastWriteTimeUtc(finalPath) == timestamp, "Polling or duplicate callback rewrote the final outcome.");
+            pending.requestId = Guid.NewGuid().ToString("N");
+            PluginProtocol.SaveNew(project, "inbox/" + pending.requestId + ".json", Encoding.UTF8.GetBytes(JsonUtility.ToJson(pending)));
+            PluginProtocol.SaveNew(project, "active-review.json", Encoding.UTF8.GetBytes(JsonUtility.ToJson(pending)));
+            ImportReview.Active = pending;
+            using (new PluginQueueLock(project))
+                method.Invoke(null, new object[] { pending.sha256, "failed", "Unity failure\r\nWindows detail\t\u0000" });
+            var failure = ImportReview.Receipt(pending);
+            Check(failure.status == "failed" && failure.message == "Unity failure\nWindows detail\t ", "Failure receipt is unreadable after message normalization.");
+            Check(ImportReview.Active == null && ImportReview.RecoveryError == null, "Desktop queue lock prevented the final callback receipt.");
             result.passed = true;
         }
         catch (Exception error) { result.error = error.ToString(); Debug.LogError(error); }

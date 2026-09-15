@@ -15,6 +15,13 @@ const PACKAGE: &str = "Packages/com.creatorworks.plugins";
 const AREA: &str = ".creator-plugins";
 const MAX_JSON: u64 = 2 * 1024 * 1024;
 const MAX_PACKAGE: u64 = 32 * 1024 * 1024;
+// Exact alpha.8 helper from 4ab615c; earlier public Hub releases had no helper.
+const LEGACY_HASHES: &[&str] = &[
+    "7d4cbdef640f5cc89c45a6c1fad1046586ea73fbf22e8ff68252e5a3b463843e",
+    "7e1bc8fb937a3324de67fb2439b8e943dda3efc6b62684da2697e1bfcfe7414e",
+    "4af0449cdb8f192a2a0ec8498db78790cf9f185e08fb9bac95c237ad7e152a5d",
+    "d7ebb4482f1194a51ad85789f11b60e9525a310b3d3b3893d9624bd22b4aa85a",
+];
 const FILES: &[(&str, &[u8])] = &[
     (
         "package.json",
@@ -168,10 +175,17 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
     if !destination.exists() {
         return Ok("missing");
     }
-    for (name, expected) in FILES {
-        if !read(&destination.join(name), 256 * 1024).is_ok_and(|bytes| bytes == *expected) {
+    let mut current = true;
+    let mut legacy = true;
+    for ((name, expected), legacy_hash) in FILES.iter().zip(LEGACY_HASHES) {
+        let Ok(bytes) = read(&destination.join(name), 256 * 1024) else {
             return Ok("different");
-        }
+        };
+        current &= bytes == *expected;
+        legacy &= digest(&bytes) == *legacy_hash;
+    }
+    if !current && !legacy {
+        return Ok("different");
     }
     let mut pending = vec![destination.to_path_buf()];
     let mut count = 0;
@@ -191,10 +205,9 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
                 .to_string_lossy()
                 .replace('\\', "/");
             if path.is_dir() {
-                if !allow_unity_metadata
-                    && !FILES
-                        .iter()
-                        .any(|(name, _)| name.starts_with(&format!("{relative}/")))
+                if !FILES
+                    .iter()
+                    .any(|(name, _)| name.starts_with(&format!("{relative}/")))
                 {
                     return Ok("different");
                 }
@@ -208,7 +221,7 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
             }
         }
     }
-    Ok("installed")
+    Ok(if current { "installed" } else { "outdated" })
 }
 fn inspect(path: &Path) -> Result<Target, String> {
     let root = canonical(path)?;
@@ -507,6 +520,7 @@ fn publish_helper(
     mut wait_for_reader: impl FnMut(std::time::Duration),
 ) -> Result<(), String> {
     let deadline = std::time::Instant::now() + HELPER_PUBLISH_BUDGET;
+    let staged_snapshot = helper_snapshot(staging)?;
     for attempt in 0..=HELPER_PUBLISH_RETRIES {
         let checked = fresh(target)?;
         if checked.open || checked.helper != "missing" {
@@ -514,7 +528,9 @@ fn publish_helper(
                 "The project or helper changed during installation. Nothing was replaced.".into(),
             );
         }
-        if helper_contents(staging, false)? != "installed" {
+        if helper_contents(staging, true)? != "installed"
+            || helper_snapshot(staging)? != staged_snapshot
+        {
             return Err("Staged Unity helper files changed. Nothing was installed.".into());
         }
         if attempt > 0 && std::time::Instant::now() >= deadline {
@@ -541,20 +557,110 @@ fn publish_helper(
     }
     unreachable!("the final publication attempt returns its result")
 }
+fn helper_snapshot(folder: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
+    let mut files = BTreeMap::new();
+    let mut folders = vec![folder.to_path_buf()];
+    let mut count = 0;
+    while let Some(current) = folders.pop() {
+        reject_links(&current)?;
+        for entry in fs::read_dir(current).map_err(|_| "Could not inspect the helper backup.")? {
+            let path = entry
+                .map_err(|_| "Could not inspect the helper backup.")?
+                .path();
+            count += 1;
+            if count > 64 {
+                return Err("Helper backup exceeds its file limit.".into());
+            }
+            reject_links(&path)?;
+            let relative = path
+                .strip_prefix(folder)
+                .map_err(|_| "Invalid helper backup path.")?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if path.is_dir() {
+                files.insert(format!("{relative}/"), Vec::new());
+                folders.push(path);
+            } else {
+                files.insert(relative, read(&path, 256 * 1024)?);
+            }
+        }
+    }
+    Ok(files)
+}
+fn upgrade_helper(
+    target: &Target,
+    staging: &Path,
+    publish: impl FnOnce(&Target, &Path) -> Result<(), String>,
+) -> Result<PathBuf, String> {
+    let checked = fresh(target)?;
+    if checked.open || checked.helper != "outdated" {
+        return Err("The project or old helper changed. Refresh projects before updating.".into());
+    }
+    let root = Path::new(&checked.path);
+    let destination = root.join(PACKAGE);
+    let before = helper_snapshot(&destination)?;
+    // Preserve Unity's GUID/import metadata without copying executable files into staging.
+    for (name, bytes) in &before {
+        if name.ends_with(".meta") {
+            save_new(&staging.join(name), bytes)?;
+        }
+    }
+    if helper_contents(staging, true)? != "installed" {
+        return Err("Staged helper changed. Nothing was updated.".into());
+    }
+    let backup_root = area(root, "helper-backups")?;
+    fs::create_dir_all(&backup_root).map_err(|_| "Could not create the helper backup folder.")?;
+    let backup_owner = tempfile::Builder::new()
+        .prefix("upgrade-")
+        .tempdir_in(&backup_root)
+        .map_err(|_| "Could not reserve a helper backup.")?;
+    // Keep the backup even on failure; it is never a disposable temporary directory.
+    let backup = backup_owner.keep().join("com.creatorworks.plugins");
+    let latest = fresh(target)?;
+    if latest.open || latest.helper != "outdated" || helper_snapshot(&destination)? != before {
+        return Err("The project or helper changed before backup. Nothing was updated.".into());
+    }
+    reject_links(&backup)?;
+    publish_directory(&destination, &backup).map_err(|error| {
+        format!("Could not back up the old helper: {error}. Nothing was updated.")
+    })?;
+    let result = (|| {
+        if helper_contents(&backup, true)? != "outdated" || helper_snapshot(&backup)? != before {
+            return Err("The old helper changed during backup.".into());
+        }
+        publish(&checked, staging)
+    })();
+    if let Err(error) = result {
+        // Never replace a directory another app/user created after the backup.
+        let restored = reject_links(&destination)
+            .and_then(|_| reject_links(&backup))
+            .and_then(|_| publish_directory(&backup, &destination).map_err(|e| e.to_string()));
+        return Err(if restored.is_ok() {
+            format!("{error} The previous helper was restored; no update was installed.")
+        } else {
+            format!("{error} Existing files were not replaced. Your previous helper is preserved at {}. Close Unity and restore that folder before continuing.", backup.display())
+        });
+    }
+    Ok(backup)
+}
 fn install(target: &Target) -> Result<(), String> {
+    let approved_helper = target.helper.clone();
     let target = fresh(target)?;
     let root = Path::new(&target.path);
     if target.helper == "installed" {
         return Ok(());
     }
-    if target.helper != "missing" {
+    if target.helper == "outdated" && approved_helper != "outdated" {
+        return Err("The helper changed after selection. Refresh projects before updating.".into());
+    }
+    if !matches!(target.helper.as_str(), "missing" | "outdated") {
         return Err(
             "Existing Creator Plugins files differ from this build. They were not overwritten."
                 .into(),
         );
     }
     if target.open {
-        return Err("Close this project's Unity Editor before adding its Creator Plugins menu. No lock file was removed.".into());
+        return Err("Close this project's Unity Editor before adding or updating its Creator Plugins menu. No lock file was removed.".into());
     }
     let _guard = operation(root)?;
     let staging = tempfile::Builder::new()
@@ -564,7 +670,14 @@ fn install(target: &Target) -> Result<(), String> {
     for (name, bytes) in FILES {
         save_new(&staging.path().join(name), bytes)?;
     }
-    publish_helper(&target, staging.path(), std::thread::sleep)
+    if target.helper == "outdated" {
+        upgrade_helper(&target, staging.path(), |target, staging| {
+            publish_helper(target, staging, std::thread::sleep)
+        })
+        .map(|_| ())
+    } else {
+        publish_helper(&target, staging.path(), std::thread::sleep)
+    }
 }
 pub fn install_worker(handle: tauri::AppHandle, project_id: String) -> Result<String, String> {
     crate::community::require_import_preview()?;
@@ -572,16 +685,36 @@ pub fn install_worker(handle: tauri::AppHandle, project_id: String) -> Result<St
     if target.helper == "installed" {
         return Ok("The matching Creator Plugins menu is already installed.".into());
     }
-    if target.helper != "missing" || target.open {
+    if !matches!(target.helper.as_str(), "missing" | "outdated") || target.open {
         return install(&target).map(|_| String::new());
     }
-    let approved = handle.dialog().message(format!("Add the Creator Plugins Editor menu to {}?\n\n{}\n\nThis adds the reviewed Editor-only package at {}. Its code runs when Unity opens this project. It does not install MCP, import community assets or save scenes. Existing files will not be overwritten.", target.name, target.path, PACKAGE)).title("Add Unity menu").kind(MessageDialogKind::Info).buttons(MessageDialogButtons::OkCancelCustom("Add menu".into(), "Cancel".into())).blocking_show();
+    let upgrading = target.helper == "outdated";
+    let (title, action, detail) = if upgrading {
+        ("Update Unity menu", "Update menu", "The recognized old helper will be backed up under .creator-plugins/helper-backups before replacement. Unity metadata is preserved. Locally modified or unknown helper files will not be overwritten.")
+    } else {
+        (
+            "Add Unity menu",
+            "Add menu",
+            "Existing files will not be overwritten.",
+        )
+    };
+    let approved = handle.dialog().message(format!("{action} for {}?\n\n{}\n\nThis changes only the Editor package at {}. Its code runs when Unity opens this project. It does not install MCP, import community assets or save scenes. {detail}", target.name, target.path, PACKAGE)).title(title).kind(MessageDialogKind::Info).buttons(MessageDialogButtons::OkCancelCustom(action.into(), "Cancel".into())).blocking_show();
     if !approved {
         return Ok("Menu installation cancelled. No project files were changed.".into());
     }
+    // Do not turn an approved fresh install into an upgrade if the target changes.
+    if fresh(&target)?.helper != target.helper {
+        return Err(
+            "The helper changed after confirmation. Refresh projects and review it again.".into(),
+        );
+    }
     install(&target)?;
     remember(&handle, inspect(Path::new(&target.path))?)?;
-    Ok("Creator Plugins menu added. Open this project in Unity, then choose Creator Plugins > Browse.".into())
+    Ok(if upgrading {
+        "Creator Plugins menu updated. The previous helper is backed up under .creator-plugins/helper-backups. Open Unity, then choose Creator Plugins > Browse."
+    } else {
+        "Creator Plugins menu added. Open this project in Unity, then choose Creator Plugins > Browse."
+    }.into())
 }
 fn validate_request(request: &ImportRequest, root: &Path) -> Result<(), String> {
     let expected = canonical(root)?.to_string_lossy().into_owned();
@@ -628,19 +761,113 @@ fn receipt(root: &Path, request_id: &str) -> Result<Option<Receipt>, String> {
     if !file.exists() {
         return Ok(None);
     }
-    let result: Receipt = serde_json::from_slice(&read(&file, 16 * 1024)?)
+    decode_receipt(&read(&file, 16 * 1024)?, request_id).map(Some)
+}
+fn decode_receipt(bytes: &[u8], request_id: &str) -> Result<Receipt, String> {
+    let result: Receipt = serde_json::from_slice(bytes)
         .map_err(|_| "Unity import receipt is invalid. Its outcome is unknown.")?;
     if result.schema_version != 1
         || result.request_id != request_id
         || !["queued", "review", "imported", "cancelled", "failed"]
             .contains(&result.status.as_str())
-        || result.message.len() > 8000
+        || result.message.trim().is_empty()
+        || result.message.encode_utf16().count() > 4000
+        || result
+            .message
+            .chars()
+            .any(|c| c.is_control() && c != '\n' && c != '\t')
     {
         return Err(
             "Unity import receipt did not match this request. Its outcome is unknown.".into(),
         );
     }
-    Ok(Some(result))
+    Ok(result)
+}
+fn prepare_inbox(root: &Path, package_id: &str) -> Result<(), String> {
+    let inbox = area(root, "inbox")?;
+    if !inbox.exists() {
+        return Ok(());
+    }
+    let mut completed = Vec::new();
+    let mut unresolved = 0;
+    let mut duplicate = false;
+    // Validate the entire bounded snapshot before moving any terminal requests.
+    for (index, entry) in fs::read_dir(&inbox)
+        .map_err(|_| "Plugin inbox cannot be read.")?
+        .enumerate()
+    {
+        if index >= 1000 {
+            return Err(
+                "Plugin inbox exceeds its recovery limit. Existing history was preserved.".into(),
+            );
+        }
+        let path = entry.map_err(|_| "Plugin inbox cannot be read.")?.path();
+        let bytes = read(&path, 16 * 1024)?;
+        let prior: ImportRequest = serde_json::from_slice(&bytes).map_err(|_| {
+            "An existing plugin request is invalid. Existing history was preserved."
+        })?;
+        validate_request(&prior, root)?;
+        if path.file_name().unwrap_or_default().to_string_lossy()
+            != format!("{}.json", prior.request_id)
+        {
+            return Err("Plugin inbox filename does not match its request.".into());
+        }
+        let archived = area(root, &format!("history/requests/{}.json", prior.request_id))?;
+        if archived.exists() {
+            return Err(
+                "A plugin request exists in both inbox and history. Existing files were preserved."
+                    .into(),
+            );
+        }
+        let receipt_path = area(root, &format!("receipts/{}.json", prior.request_id))?;
+        let receipt_bytes = if receipt_path.exists() {
+            Some(read(&receipt_path, 16 * 1024)?)
+        } else {
+            None
+        };
+        let result = receipt_bytes
+            .as_ref()
+            .map(|bytes| decode_receipt(bytes, &prior.request_id))
+            .transpose()?;
+        match result {
+            Some(result)
+                if matches!(result.status.as_str(), "imported" | "cancelled" | "failed") =>
+            {
+                completed.push((path, archived, bytes, receipt_path, receipt_bytes.unwrap()))
+            }
+            Some(_) => return Err(
+                "An older intermediate receipt needs inspection in Unity. No history was changed."
+                    .into(),
+            ),
+            None => {
+                unresolved += 1;
+                duplicate |= prior.package_id == package_id;
+            }
+        }
+    }
+    if unresolved >= 100 {
+        return Err("The plugin inbox is full with 100 unresolved requests. Finish or cancel existing imports before adding another.".into());
+    }
+    if duplicate {
+        return Err("This package already has an unresolved Unity request. Review that request before adding it again.".into());
+    }
+    for (source, destination, bytes, receipt_path, receipt_bytes) in completed {
+        fs::create_dir_all(destination.parent().unwrap())
+            .map_err(|_| "Could not create plugin history.")?;
+        reject_links(&destination)?;
+        if read(&source, 16 * 1024)? != bytes || read(&receipt_path, 16 * 1024)? != receipt_bytes {
+            return Err(
+                "A plugin request changed before archival. No new import was queued.".into(),
+            );
+        }
+        publish_directory(&source, &destination).map_err(|e| {
+            format!("Could not retain completed import history: {e}. No new import was queued.")
+        })?;
+        if read(&destination, 16 * 1024)? != bytes {
+            return Err("A plugin request changed during archival. Inspect its preserved history before continuing.".into());
+        }
+    }
+    Ok(())
 }
 pub fn queue(
     target: &Target,
@@ -663,36 +890,6 @@ pub fn queue(
         return Err("Package checksum did not match. Nothing was queued.".into());
     }
     let _guard = operation(root)?;
-    let inbox = area(root, "inbox")?;
-    if inbox.exists() {
-        let mut count = 0;
-        for item in fs::read_dir(&inbox).map_err(|_| "Plugin inbox cannot be read.")? {
-            count += 1;
-            if count >= 100 {
-                return Err(
-                    "The plugin inbox is full (100-request preview limit). No further package was queued."
-                        .into(),
-                );
-            }
-            let item = item.map_err(|_| "Plugin inbox cannot be read.")?;
-            if item.path().extension().is_some_and(|s| s == "json") {
-                let prior: ImportRequest = serde_json::from_slice(&read(&item.path(), 16 * 1024)?)
-                    .map_err(|_| {
-                        "An existing plugin request is invalid. Review the inbox before continuing."
-                    })?;
-                validate_request(&prior, root)?;
-                if item.file_name().to_string_lossy() != format!("{}.json", prior.request_id) {
-                    return Err("Plugin inbox filename does not match its request.".into());
-                }
-                if prior.package_id == package_id
-                    && receipt(root, &prior.request_id)?
-                        .is_none_or(|r| matches!(r.status.as_str(), "queued" | "review"))
-                {
-                    return Err("This package already has an unresolved Unity request. Review that request before adding it again.".into());
-                }
-            }
-        }
-    }
     let mut random = [0u8; 16];
     getrandom::fill(&mut random).map_err(|_| "Could not create an import request identifier.")?;
     let request_id: String = random.iter().map(|b| format!("{b:02x}")).collect();
@@ -709,11 +906,12 @@ pub fn queue(
     };
     validate_request(&request, root)?;
     let file = area(root, &format!("packages/{}", request.package_file))?;
-    if file.exists() {
-        if digest(&read(&file, MAX_PACKAGE)?) != sha256 {
-            return Err("The existing cached package differs. It was not overwritten.".into());
-        }
-    } else {
+    if file.exists() && digest(&read(&file, MAX_PACKAGE)?) != sha256 {
+        return Err("The existing cached package differs. It was not overwritten.".into());
+    }
+    fresh(&target)?;
+    prepare_inbox(root, package_id)?;
+    if !file.exists() {
         save_new(&file, bytes)?;
     }
     if fresh(&target)?.helper != "installed" {
@@ -723,7 +921,7 @@ pub fn queue(
         &area(root, &format!("inbox/{request_id}.json"))?,
         &serde_json::to_vec(&request).map_err(|_| "Could not encode the import request.")?,
     )?;
-    Ok(Outcome { project_id: target.id, request_id, status: "queued".into(), message: "Queued for review, not imported. In this project's Unity Editor, open Creator Plugins > Browse and choose Review import.".into() })
+    Ok(Outcome { project_id: target.id, request_id, status: "queued".into(), message: "Queued, not imported. In this project's Unity Editor, open Creator Plugins > Browse and choose Import into project.".into() })
 }
 pub fn status_worker(
     handle: tauri::AppHandle,
@@ -738,11 +936,18 @@ fn status(target: &Target, request_id: &str) -> Result<Outcome, String> {
         return Err("Invalid import request identifier.".into());
     }
     let root = Path::new(&target.path);
-    let request: ImportRequest = serde_json::from_slice(&read(
-        &area(root, &format!("inbox/{request_id}.json"))?,
-        16 * 1024,
-    )?)
-    .map_err(|_| "Import request is invalid.")?;
+    let _guard = operation(root)?;
+    let inbox = area(root, &format!("inbox/{request_id}.json"))?;
+    let history = area(root, &format!("history/requests/{request_id}.json"))?;
+    if inbox.exists() && history.exists() {
+        return Err(
+            "A plugin request exists in both inbox and history. Its outcome is unknown.".into(),
+        );
+    }
+    let archived = !inbox.exists();
+    let request: ImportRequest =
+        serde_json::from_slice(&read(if archived { &history } else { &inbox }, 16 * 1024)?)
+            .map_err(|_| "Import request is invalid.")?;
     validate_request(&request, root)?;
     if request.request_id != request_id {
         return Err("Import request identity changed.".into());
@@ -751,6 +956,7 @@ fn status(target: &Target, request_id: &str) -> Result<Outcome, String> {
         Some(r) if matches!(r.status.as_str(), "imported" | "cancelled" | "failed") => (r.status, r.message),
         Some(_) => return Err("This request has an older intermediate receipt. It was preserved; inspect its outcome in Unity before continuing. No import was retried.".into()),
         None => {
+            if archived { return Err("Archived plugin request has no final receipt. Its outcome is unknown.".into()); }
             let active_path = area(root, "active-review.json")?;
             let active = if active_path.exists() {
                 let active: ImportRequest = serde_json::from_slice(&read(&active_path, 16 * 1024)?)
@@ -779,6 +985,150 @@ fn status(target: &Target, request_id: &str) -> Result<Outcome, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const OLD_FILES: &[(&str, &[u8])] = &[
+        ("package.json", include_bytes!("../../tests/fixtures/helper-alpha8/unity/com.creatorworks.plugins/package.json")),
+        ("LICENSE.md", include_bytes!("../../tests/fixtures/helper-alpha8/unity/com.creatorworks.plugins/LICENSE.md")),
+        ("Editor/CreatorWorks.Plugins.Editor.asmdef", include_bytes!("../../tests/fixtures/helper-alpha8/unity/com.creatorworks.plugins/Editor/CreatorWorks.Plugins.Editor.asmdef")),
+        ("Editor/CreatorPluginsWindow.cs", include_bytes!("../../tests/fixtures/helper-alpha8/unity/com.creatorworks.plugins/Editor/CreatorPluginsWindow.cs")),
+    ];
+    fn old_helper(root: &Path) -> Target {
+        project(root);
+        for ((name, bytes), expected) in OLD_FILES.iter().zip(LEGACY_HASHES) {
+            assert_eq!(digest(bytes), *expected, "legacy fixture changed: {name}");
+            save_new(&root.join(PACKAGE).join(name), bytes).unwrap();
+        }
+        save_new(
+            &root.join(PACKAGE).join("Editor.meta"),
+            b"guid: retained-folder\n",
+        )
+        .unwrap();
+        save_new(
+            &root
+                .join(PACKAGE)
+                .join("Editor/CreatorPluginsWindow.cs.meta"),
+            b"guid: retained-script\n",
+        )
+        .unwrap();
+        inspect(root).unwrap()
+    }
+    fn current_staging(root: &Path) -> tempfile::TempDir {
+        let staging = tempfile::tempdir_in(root).unwrap();
+        for (name, bytes) in FILES {
+            save_new(&staging.path().join(name), bytes).unwrap();
+        }
+        staging
+    }
+    #[test]
+    fn known_helper_upgrade_backs_up_exact_files_and_preserves_metadata_and_project() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = old_helper(temp.path());
+        assert_eq!(target.helper, "outdated");
+        let before = helper_snapshot(&temp.path().join(PACKAGE)).unwrap();
+        let manifest = fs::read(temp.path().join("Packages/manifest.json")).unwrap();
+        install(&target).unwrap();
+        assert_eq!(helper_state(temp.path()).unwrap(), "installed");
+        let backups = fs::read_dir(area(temp.path(), "helper-backups").unwrap())
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(
+            helper_snapshot(&backups[0].path().join("com.creatorworks.plugins")).unwrap(),
+            before
+        );
+        for (name, bytes) in before.iter().filter(|(name, _)| name.ends_with(".meta")) {
+            assert_eq!(
+                fs::read(temp.path().join(PACKAGE).join(name)).unwrap(),
+                *bytes
+            );
+        }
+        assert_eq!(
+            fs::read(temp.path().join("Packages/manifest.json")).unwrap(),
+            manifest
+        );
+        assert_eq!(
+            fs::read_to_string(temp.path().join("Assets/Manual.unity")).unwrap(),
+            "manually arranged scene"
+        );
+    }
+    #[test]
+    fn unknown_or_open_old_helper_never_moves() {
+        for mutation in ["code", "extra", "open"] {
+            let temp = tempfile::tempdir().unwrap();
+            let target = old_helper(temp.path());
+            match mutation {
+                "code" => fs::write(
+                    temp.path()
+                        .join(PACKAGE)
+                        .join("Editor/CreatorPluginsWindow.cs"),
+                    "custom code",
+                )
+                .unwrap(),
+                "extra" => fs::write(
+                    temp.path().join(PACKAGE).join("Editor/User.cs"),
+                    "custom code",
+                )
+                .unwrap(),
+                _ => {
+                    fs::create_dir(temp.path().join("Temp")).unwrap();
+                    fs::write(temp.path().join("Temp/UnityLockfile"), "").unwrap();
+                }
+            }
+            let before = helper_snapshot(&temp.path().join(PACKAGE)).unwrap();
+            assert!(install(&target).is_err());
+            assert_eq!(helper_snapshot(&temp.path().join(PACKAGE)).unwrap(), before);
+            assert!(!area(temp.path(), "helper-backups").unwrap().exists());
+        }
+    }
+    #[test]
+    fn failed_upgrade_restores_the_complete_previous_helper() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = old_helper(temp.path());
+        let before = helper_snapshot(&temp.path().join(PACKAGE)).unwrap();
+        let staging = current_staging(temp.path());
+        let error = upgrade_helper(&target, staging.path(), |_, _| {
+            Err("Fixture publication failure.".into())
+        })
+        .unwrap_err();
+        assert!(error.contains("previous helper was restored"));
+        assert_eq!(helper_snapshot(&temp.path().join(PACKAGE)).unwrap(), before);
+    }
+    #[test]
+    fn failed_upgrade_preserves_backup_and_a_raced_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = old_helper(temp.path());
+        let before = helper_snapshot(&temp.path().join(PACKAGE)).unwrap();
+        let staging = current_staging(temp.path());
+        let error = upgrade_helper(&target, staging.path(), |_, _| {
+            fs::create_dir(temp.path().join(PACKAGE)).unwrap();
+            fs::write(temp.path().join(PACKAGE).join("User.cs"), "raced user data").unwrap();
+            Err("Fixture raced destination.".into())
+        })
+        .unwrap_err();
+        assert!(error.contains("previous helper is preserved at"));
+        assert_eq!(
+            fs::read_to_string(temp.path().join(PACKAGE).join("User.cs")).unwrap(),
+            "raced user data"
+        );
+        let backup = fs::read_dir(area(temp.path(), "helper-backups").unwrap())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(
+            helper_snapshot(&backup.join("com.creatorworks.plugins")).unwrap(),
+            before
+        );
+    }
+    #[test]
+    fn fresh_install_selection_never_silently_authorizes_an_upgrade() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = project(temp.path());
+        old_helper(temp.path());
+        assert!(install(&missing).unwrap_err().contains("after selection"));
+        assert_eq!(helper_state(temp.path()).unwrap(), "outdated");
+    }
     #[test]
     #[ignore = "Explicit concurrent filesystem diagnostic; preserves only failed disposable fixtures"]
     fn stress_helper_publication() {
@@ -1273,7 +1623,7 @@ mod tests {
         let mut waits = 0;
         let error = publish_helper(&target, staging.path(), |_| waits += 1).unwrap_err();
         assert!(waits > 0 && waits <= HELPER_PUBLISH_RETRIES);
-        assert!(error.contains("os error 5"));
+        assert!(error.contains("os error 5") || error.contains("Timed out"), "{error}");
         assert!(error.contains("try again"));
         assert!(!root.path().join(PACKAGE).exists());
         assert_eq!(helper_contents(staging.path(), false).unwrap(), "installed");
@@ -1486,6 +1836,235 @@ mod tests {
         )
         .unwrap()
         .exists());
+    }
+    #[test]
+    fn repeated_terminal_imports_archive_without_losing_receipts_or_status() {
+        let temp = tempfile::tempdir().unwrap();
+        let (target, mut request) = queued_fixture(temp.path());
+        let first = request.request_id.clone();
+        for _ in 0..125 {
+            let request_bytes = serde_json::to_vec(&request).unwrap();
+            let receipt_bytes = serde_json::to_vec(&Receipt {
+                schema_version: 1,
+                request_id: request.request_id.clone(),
+                status: "cancelled".into(),
+                message: "Fixture cancellation".into(),
+            })
+            .unwrap();
+            let receipt_path = area(
+                temp.path(),
+                &format!("receipts/{}.json", request.request_id),
+            )
+            .unwrap();
+            save_new(&receipt_path, &receipt_bytes).unwrap();
+            let next = queue(
+                &target,
+                "fixture.status",
+                "1.0.0",
+                "Test",
+                &digest(b"fixture"),
+                b"fixture",
+            )
+            .unwrap();
+            assert_eq!(
+                fs::read(
+                    area(
+                        temp.path(),
+                        &format!("history/requests/{}.json", request.request_id)
+                    )
+                    .unwrap()
+                )
+                .unwrap(),
+                request_bytes
+            );
+            assert_eq!(fs::read(receipt_path).unwrap(), receipt_bytes);
+            assert_eq!(
+                status(&target, &request.request_id).unwrap().status,
+                "cancelled"
+            );
+            request = serde_json::from_slice(
+                &read(
+                    &area(temp.path(), &format!("inbox/{}.json", next.request_id)).unwrap(),
+                    16 * 1024,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            fs::read_dir(area(temp.path(), "inbox").unwrap())
+                .unwrap()
+                .count(),
+            1
+        );
+        assert_eq!(
+            fs::read_dir(area(temp.path(), "history/requests").unwrap())
+                .unwrap()
+                .count(),
+            125
+        );
+        assert_eq!(status(&target, &first).unwrap().status, "cancelled");
+    }
+    #[test]
+    fn archival_refuses_bad_receipts_and_collisions_before_moving_anything() {
+        for bad in ["malformed", "intermediate", "collision", "bad-request"] {
+            let temp = tempfile::tempdir().unwrap();
+            let (target, request) = queued_fixture(temp.path());
+            let original = read(
+                &area(temp.path(), &format!("inbox/{}.json", request.request_id)).unwrap(),
+                16 * 1024,
+            )
+            .unwrap();
+            let receipt_path = area(
+                temp.path(),
+                &format!("receipts/{}.json", request.request_id),
+            )
+            .unwrap();
+            let final_bytes = serde_json::to_vec(&Receipt {
+                schema_version: 1,
+                request_id: request.request_id.clone(),
+                status: if bad == "intermediate" {
+                    "review"
+                } else {
+                    "cancelled"
+                }
+                .into(),
+                message: "Fixture".into(),
+            })
+            .unwrap();
+            save_new(
+                &receipt_path,
+                if bad == "malformed" {
+                    b"{}"
+                } else {
+                    &final_bytes
+                },
+            )
+            .unwrap();
+            if bad == "collision" {
+                save_new(
+                    &area(
+                        temp.path(),
+                        &format!("history/requests/{}.json", request.request_id),
+                    )
+                    .unwrap(),
+                    b"existing history",
+                )
+                .unwrap();
+            }
+            if bad == "bad-request" {
+                save_new(
+                    &area(temp.path(), &format!("inbox/{}.json", "0".repeat(32))).unwrap(),
+                    b"{}",
+                )
+                .unwrap();
+            }
+            assert!(
+                queue(
+                    &target,
+                    "fixture.next",
+                    "1.0.0",
+                    "Test",
+                    &digest(b"fixture"),
+                    b"fixture"
+                )
+                .is_err(),
+                "{bad}"
+            );
+            assert_eq!(
+                read(
+                    &area(temp.path(), &format!("inbox/{}.json", request.request_id)).unwrap(),
+                    16 * 1024
+                )
+                .unwrap(),
+                original
+            );
+            if bad != "collision" {
+                assert!(!area(temp.path(), "history").unwrap().exists());
+            }
+        }
+    }
+    #[test]
+    fn history_status_requires_terminal_receipt_and_respects_queue_lock() {
+        let temp = tempfile::tempdir().unwrap();
+        let (target, request) = queued_fixture(temp.path());
+        let guard = operation(temp.path()).unwrap();
+        assert!(status(&target, &request.request_id)
+            .unwrap_err()
+            .contains("Another Creator app"));
+        drop(guard);
+        let source = area(temp.path(), &format!("inbox/{}.json", request.request_id)).unwrap();
+        let dest = area(
+            temp.path(),
+            &format!("history/requests/{}.json", request.request_id),
+        )
+        .unwrap();
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        publish_directory(&source, &dest).unwrap();
+        assert!(status(&target, &request.request_id)
+            .unwrap_err()
+            .contains("no final receipt"));
+        save_new(&source, &fs::read(&dest).unwrap()).unwrap();
+        assert!(status(&target, &request.request_id)
+            .unwrap_err()
+            .contains("both inbox and history"));
+    }
+    #[test]
+    fn receipts_match_unity_text_limits_without_accepting_control_characters() {
+        let id = "a".repeat(32);
+        for message in [
+            " ".into(),
+            "bad\rline".into(),
+            "bad\0line".into(),
+            "x".repeat(4001),
+            "\u{1f600}".repeat(2001),
+        ] {
+            let bytes = serde_json::to_vec(&Receipt {
+                schema_version: 1,
+                request_id: id.clone(),
+                status: "cancelled".into(),
+                message,
+            })
+            .unwrap();
+            assert!(decode_receipt(&bytes, &id).is_err());
+        }
+        let bytes = serde_json::to_vec(&Receipt {
+            schema_version: 1,
+            request_id: id.clone(),
+            status: "cancelled".into(),
+            message: "Lines\nand\ttabs".into(),
+        })
+        .unwrap();
+        assert!(decode_receipt(&bytes, &id).is_ok());
+    }
+    #[test]
+    fn inbox_allows_the_100th_unresolved_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let (target, mut request) = queued_fixture(temp.path());
+        for id in 1..99 {
+            request.request_id = format!("{id:032x}");
+            request.package_id = format!("fixture.item{id}");
+            save_new(
+                &area(temp.path(), &format!("inbox/{}.json", request.request_id)).unwrap(),
+                &serde_json::to_vec(&request).unwrap(),
+            )
+            .unwrap();
+        }
+        queue(
+            &target,
+            "fixture.last",
+            "1.0.0",
+            "Test",
+            &digest(b"fixture"),
+            b"fixture",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_dir(area(temp.path(), "inbox").unwrap())
+                .unwrap()
+                .count(),
+            100
+        );
     }
     #[test]
     fn queue_identity_rejects_leading_punctuation_and_control_characters() {

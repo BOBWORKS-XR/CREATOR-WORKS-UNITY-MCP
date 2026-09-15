@@ -21,12 +21,17 @@ test('installed acceptance can run on the approved test branch without publishin
 
 test('stable and alpha upgrades test one build before exposing the accepted candidate', () => {
   const workflow = readFileSync('.github/workflows/windows-installer-acceptance.yml', 'utf8');
-  assert.match(workflow, /baseline: \['2\.6\.0', '2\.7\.0-alpha\.1'\]/);
+  assert.match(workflow, /baseline: \['2\.6\.0', '2\.7\.0-alpha\.1', '2\.7\.0-alpha\.2'\]/);
   assert.equal((workflow.match(/build --bundles nsis/g) || []).length, 1);
   assert.match(workflow, /accepted-candidate:\s+needs: \[build-candidate, installed-upgrade\]/);
   assert.match(workflow, /EXPECTED_INSTALLER_SHA256: \$\{\{ needs\.build-candidate\.outputs\.installer-sha256 \}\}/);
   const harness = readFileSync('scripts/test-installed-upgrade-ci.ps1', 'utf8');
-  assert.match(harness, /ValidateSet\('2\.6\.0', '2\.7\.0-alpha\.1'\)/);
+  assert.match(harness, /ValidateSet\('2\.6\.0', '2\.7\.0-alpha\.1', '2\.7\.0-alpha\.2'\)/);
+  assert.match(workflow, /run-id: 34985053768/);
+  assert.match(workflow, /name: mcp-windows-stable-candidate/);
+  assert.match(harness, /e5997ad60ae7d331b15a0b1038042e8062492589602724206eeb943093113c1e/);
+  assert.match(harness, /7138bbf4efe3e58018071e7023220f0c637ddd89339f1a9de0d8db2a6b5f62e7/);
+  assert.ok(harness.indexOf('Accepted alpha 2 artifact hash mismatch') < harness.indexOf("Run-Setup $baseline '/S /NS'"));
   assert.match(harness, /8f39b9f2e120076346873dc8cc3186e6a2c055e1cca4cf9b8b66dfb700f12c41/);
   assert.match(harness, /04971c5c6cc2c3346606d4ae96bbea465c9924b564a1fe928f7d7d006527de65/);
   assert.ok(harness.indexOf('Candidate differs from the exact installer') < harness.indexOf("Run-Setup $baseline '/S /NS'"));

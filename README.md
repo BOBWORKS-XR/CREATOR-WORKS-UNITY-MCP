@@ -2,17 +2,21 @@
 
 Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases) | [2.7.0-alpha.1 preview notes](docs/releases/2.7.0-alpha.1.md) | [2.6.0 stable notes](docs/releases/2.6.0.md)
+[All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases) | [2.7.0 Windows notes](docs/releases/2.7.0.md) | [2.6.0 notes](docs/releases/2.6.0.md)
 
-**Windows preview: 2.7.0-alpha.1** adds the coordinated Creator Hub experience,
-the compact shared app interface, guarded installer upgrades, and complete packaged
-dependency notices. The exact approved build can run its normal controls inside
-Hub after native consent, while the standalone app remains available. This is a
-test release, not a stable replacement or an automatic migration of old installs.
+**2.7.0 for Windows** combines the Creator Hub experience with the built-in
+Creator Plugins catalogue and safer upgrades. Browse community contributions,
+read their requirements, and send supported packages to your chosen Unity
+project for manual import review. MCP still works on its own without Hub.
 
-Hub users should update to the coordinated preview instead of installing the old
-2.6.0 Windows package: Hub blocks that specific installer because of its setup
-defect. Existing verified 2.6.0 installations can still be opened.
+Known older Unity plugin menus can be updated with a backup. Cancelled and
+completed imports keep their history without filling the pending queue, and
+Unity and desktop apps coordinate queue access. Your existing scene and SDK
+tools, client settings, and token-aware profiles remain available.
+
+Release availability and exact installer acceptance are recorded on the linked
+release page. Do not use the old 2.6.0 Windows installer for a new Hub install;
+existing verified 2.6.0 installations can be upgraded without deleting settings.
 
 **2.6.0 brings the first token-efficiency release to stable**, with deep-hierarchy
 and command-status fixes, measured transform receipts, optional local feedback,
@@ -27,6 +31,7 @@ controls. Keep a backup and verify your own SDK/project workflow after upgrading
 
 - **Guided setup:** packages a private Node.js 24 LTS runtime and configures Codex, Claude Code, Antigravity, and OpenCode without requiring a separate Node installation
 - **Multi-project Unity workflow:** discovers Unity Hub projects, remembers the active project, routes MCP calls explicitly, and updates project-local bridges with backups
+- **Creator Plugins:** shared community catalogue, clear package requirements and code warnings, bounded downloads, and explicit Unity import review; instructions-only contributions are not imported as Unity assets
 - **Creator and Banter SDK awareness:** identifies Creator SDK, legacy Banter SDK, hybrid, Unity-only, and unknown projects, then selects the appropriate `BS.*` or `Banter.*` contracts
 - **Unity scene and asset tooling:** creates and modifies GameObjects, components, references, prefabs, scenes, build settings, and batches with preflight checks and Unity Undo support
 - **Native Visual Scripting:** generates, validates, writes, imports, and checks Unity Visual Scripting graphs using a source-observed custom-node catalogue and SDK validator
@@ -56,7 +61,7 @@ installer, Unity AI integration, or a player emulator.
 
 ## Quick Start
 
-1. For Windows testing, [install Creator Hub](https://github.com/BOBWORKS-XR/CREATOR-HUB/releases/tag/v0.1.0-alpha.3), leave **Include prereleases** enabled, then choose **Install app** or **Update app** on its MCP page. Existing MCP users do not need a separate MCP download or Project Setup. The [direct installer](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.7.0-alpha.1) remains available for standalone use. Linux/macOS packages remain on the separate stable release track.
+1. On Windows, [install Creator Hub](https://github.com/BOBWORKS-XR/CREATOR-HUB/releases/latest), then choose **Install app** or **Update app** on its MCP page. Existing MCP users do not need Project Setup. A [direct MCP installer](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases) is also available for standalone use. Linux/macOS packages remain on the separate 2.6.0 stable release track.
 2. Open **Creator Works MCP** and choose a Unity project.
 3. Select the MCP clients you want to configure.
 4. Press **Set Up Creator Works MCP**.
@@ -281,16 +286,16 @@ Looking for the former **BANTWORKS MCP** name or old launcher layout? [Open the 
 
 ## Development
 
-The Windows `2.7.0-alpha.1` prerelease includes the
+The Windows `2.7.0` update includes the
 [Creator Hub identity contract](docs/creator-hub-compatibility.md), compact shared
 interface, and [hosted MCP preview](docs/creator-hub-hosted-preview.md). A verified
 compatible Hub can open the normal writable controls after native consent,
 using the installed MCP's existing settings and resources. The optional read-only
 mode remains available for development; it is not the only hosting mode.
 Project and configuration controls lock during operations, and standalone MCP
-remains available without Hub. Stable downloads remain on `2.6.0`.
+remains available without Hub. Native macOS/Linux Hub hosting is not part of this Windows update.
 
-The [coordinated release notes](docs/releases/2.7.0-alpha.1.md) distinguish accepted
+The [coordinated release notes](docs/releases/2.7.0.md) distinguish accepted
 Windows installer checks from final through-Hub testing. Metadata identity alone
 does not grant hosting or mutation authority. Automatic shortcut adoption,
 transfer of an already-open app, and all historical installation migrations

@@ -21,6 +21,7 @@ const files = new Map([
   ['/community.js', ['community.js', 'text/javascript']],
   ['/community.css', ['community.css', 'text/css']],
   ['/icons/puzzle.svg', ['icons/puzzle.svg', 'image/svg+xml']],
+  ['/icons/creator-plugins.svg', ['icons/creator-plugins.svg', 'image/svg+xml']],
   ['/icons/folder-open.svg', ['icons/folder-open.svg', 'image/svg+xml']],
   ['/icons/refresh-cw.svg', ['icons/refresh-cw.svg', 'image/svg+xml']],
   ['/icons/download.svg', ['icons/download.svg', 'image/svg+xml']],
@@ -267,6 +268,12 @@ try {
   }));
   assert.deepEqual(converterMark,{background:'rgb(0, 0, 0)',radius:'5px',width:34,imageWidth:22,loaded:true,badge:'C'});
   checks.push('official SideQuest Converter mark and non-actionable Converter entry');
+  const pluginsMark = await page.locator('[data-local-view="plugins"] .app-icon').evaluate(el => ({
+    source:el.querySelector('img').getAttribute('src'), loaded:el.querySelector('img').complete && el.querySelector('img').naturalWidth === 64,
+    width:el.querySelector('img').width, badges:el.querySelectorAll('.app-letter').length
+  }));
+  assert.deepEqual(pluginsMark,{source:'icons/creator-plugins.svg',loaded:true,width:30,badges:0});
+  checks.push('shared cube/puzzle Plugins icon loads without an overlapping letter badge');
   await page.screenshot({path:path.join(output,'desktop-menu.png')});
   await page.keyboard.press('Escape');
   await closed();

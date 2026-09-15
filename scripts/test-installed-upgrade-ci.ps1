@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Installer,
-    [ValidateSet('2.6.0', '2.7.0-alpha.1')][string]$BaselineVersion = '2.6.0',
+    [ValidateSet('2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2')][string]$BaselineVersion = '2.6.0',
+    [string]$BaselineInstaller,
     [string]$ExpectedInstallerSha256
 )
 $ErrorActionPreference = 'Stop'
@@ -14,7 +15,7 @@ $candidate = (Resolve-Path -LiteralPath $Installer).Path
 $candidateRoot = [IO.Path]::GetFullPath((Join-Path $repo 'launcher\src-tauri\target\release\bundle\nsis')) + '\'
 if (-not $candidate.StartsWith($candidateRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Candidate must be built in this checkout.' }
 $version = (Get-Content -LiteralPath (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json).version
-if ($version -ne '2.7.0-alpha.2') { throw 'Review this version-specific acceptance fixture before using another release.' }
+if ($version -ne '2.7.0') { throw 'Review this version-specific acceptance fixture before using another release.' }
 $installRoot = Join-Path $env:LOCALAPPDATA 'Creator Works MCP'
 $configRoot = Join-Path $env:APPDATA 'creator-works-mcp'
 $productKey = 'HKCU:\Software\Creator Works\Creator Works MCP'
@@ -97,11 +98,26 @@ try {
             installerSha256 = '8f39b9f2e120076346873dc8cc3186e6a2c055e1cca4cf9b8b66dfb700f12c41'
             executableSha256 = '04971c5c6cc2c3346606d4ae96bbea465c9924b564a1fe928f7d7d006527de65'
         }
+        '2.7.0-alpha.2' = @{
+            asset = 'Creator Works MCP_2.7.0-alpha.2_x64-setup.exe'
+            installerSha256 = 'e5997ad60ae7d331b15a0b1038042e8062492589602724206eeb943093113c1e'
+            executableSha256 = '7138bbf4efe3e58018071e7023220f0c637ddd89339f1a9de0d8db2a6b5f62e7'
+        }
     }
     $baselinePin = $baselines[$BaselineVersion]
     $baseline = Join-Path $fixture $baselinePin.asset
-    Invoke-WebRequest -UseBasicParsing -Uri ("https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/download/v$BaselineVersion/" + $baselinePin.asset) -OutFile $baseline
-    Require ((Hash $baseline) -ceq $baselinePin.installerSha256) 'Public baseline hash mismatch.'
+    if ($BaselineVersion -ceq '2.7.0-alpha.2') {
+        Require (-not [string]::IsNullOrWhiteSpace($BaselineInstaller)) 'Alpha 2 must come from its pinned accepted CI artifact, not a public release.'
+        $baselineSource = (Resolve-Path -LiteralPath $BaselineInstaller).Path
+        $baselineRoot = [IO.Path]::GetFullPath((Join-Path $repo 'artifacts\accepted-alpha2-baseline')) + '\'
+        Require ($baselineSource.StartsWith($baselineRoot, [StringComparison]::OrdinalIgnoreCase)) 'Alpha 2 baseline must be downloaded into the dedicated CI fixture.'
+        Require ((Hash $baselineSource) -ceq $baselinePin.installerSha256) 'Accepted alpha 2 artifact hash mismatch.'
+        Copy-Item -LiteralPath $baselineSource -Destination $baseline
+    } else {
+        Require ([string]::IsNullOrWhiteSpace($BaselineInstaller)) 'Public baselines must use their pinned release assets.'
+        Invoke-WebRequest -UseBasicParsing -Uri ("https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/download/v$BaselineVersion/" + $baselinePin.asset) -OutFile $baseline
+    }
+    Require ((Hash $baseline) -ceq $baselinePin.installerSha256) 'Baseline hash mismatch.'
     # /R is deliberately absent: neither installer may start the real GUI.
     Run-Setup $baseline '/S /NS' 0 "Clean baseline $BaselineVersion installation"
     Require ((Hash (Join-Path $installRoot 'creator-works-mcp-launcher.exe')) -ceq $baselinePin.executableSha256) 'Unexpected baseline launcher payload.'

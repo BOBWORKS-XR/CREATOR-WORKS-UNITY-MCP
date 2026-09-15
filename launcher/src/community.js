@@ -57,7 +57,7 @@
   const menuAction = button('Add menu to project', 'community-secondary', () => projectAction(async () => {
     const id = projectSelect.value; projectMessage.textContent = await invoke('install_community_menu', { projectId: id });
     await refreshTargets();
-  }, 'Adding the Unity menu... Please wait.'), 'plugins');
+  }, 'Preparing the Unity menu... Please wait.'), 'plugins');
   const sendAction = button('Send to Unity for review', 'community-primary', () => projectAction(async () => {
     outcome = await invoke('queue_community_import', { id: importEntry.id, projectId: projectSelect.value });
     showOutcome();
@@ -80,10 +80,11 @@
     projectSelect.disabled = browseProject.disabled = refreshProjects.disabled = closeProject.disabled = projectBusy;
     projectPath.textContent = target?.path || '';
     projectInfo.textContent = target ? `Unity ${target.unityVersion} / ${target.sdk}` : '';
-    const helperNote = !target ? 'Choose the project you want to change.' : target.helper === 'different' ? 'Existing Creator Plugins files differ. They will not be overwritten.' : target.helper === 'missing' ? (target.open ? 'Close this project in Unity before adding its menu.' : 'The Creator Plugins menu is not installed in this project.') : 'Creator Plugins menu installed.';
+    const helperNote = !target ? 'Choose the project you want to change.' : target.helper === 'different' ? 'Existing Creator Plugins files differ. They will not be overwritten.' : target.helper === 'outdated' ? (target.open ? 'Close this project in Unity before updating its menu.' : 'A known older Creator Plugins menu is installed. Updating backs it up and preserves Unity metadata.') : target.helper === 'missing' ? (target.open ? 'Close this project in Unity before adding its menu.' : 'The Creator Plugins menu is not installed in this project.') : 'Creator Plugins menu installed.';
     projectSafety.textContent = `${helperNote} ${importEntry ? 'Packages are queued outside Assets. Review files in Unity before importing; no scenes are saved automatically.' : 'Adds an Editor-only package. It does not install MCP or community assets.'}`;
     menuAction.hidden = target?.helper === 'installed';
-    menuAction.disabled = projectBusy || projectError || !target || target.helper !== 'missing' || target.open;
+    menuAction.lastChild.textContent = target?.helper === 'outdated' ? 'Update menu in project' : 'Add menu to project';
+    menuAction.disabled = projectBusy || projectError || !target || !['missing', 'outdated'].includes(target.helper) || target.open;
     sendAction.hidden = !importEntry;
     sendAction.disabled = projectBusy || projectError || !target || target.helper !== 'installed' || !importEntry || importEntry.reviewStatus !== 'listed' || Boolean(snapshot?.stale) || Boolean(outcome?.requestId && ['queued', 'review'].includes(outcome.status));
     checkAction.hidden = !outcome?.requestId; checkAction.disabled = projectBusy || !outcome?.requestId;

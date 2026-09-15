@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 2.7.0 - Windows
+
+See [release notes](docs/releases/2.7.0.md) for the coordinated release and acceptance boundaries.
+
+- Creator Plugins catalogue in MCP, shared with Hub/Setup, with explicit project selection, code warnings, checksum/size checks, and Unity's own import review.
+- Compact shared app interface and compatible writable Hub hosting after native consent; standalone MCP and existing settings remain available.
+- Safer Windows upgrade preflight. A busy installed app/runtime refuses replacement without killing unrelated processes or deleting settings.
+- Backup-preserving updates for the exact known older Unity plugin helper; custom or changed helpers are never silently replaced.
+- Bound plugin queues across Unity and desktop writers using the same lock; preserve final receipts and archive completed requests so explicit retries do not exhaust pending slots.
+- Normalize Unity callback error messages so Windows line endings remain readable in final import receipts.
+- Existing token-aware profiles and Unity, Banter, Creator SDK, Visual Scripting and Shader Graph tooling remain available. No new token-savings percentage is claimed.
+
 ## 2.6.0 - 2026-09-09
 
 Stable release of the initial token-efficiency work. See [release notes](docs/releases/2.6.0.md).

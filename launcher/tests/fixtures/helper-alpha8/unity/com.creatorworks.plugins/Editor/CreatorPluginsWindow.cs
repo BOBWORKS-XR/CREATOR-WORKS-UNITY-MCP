@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -49,14 +48,6 @@ namespace CreatorWorks.Plugins
         internal const long MaxPackage = 32 * 1024 * 1024;
         internal static bool Hex(string value, int length) => value != null && value.Length == length && value.All(c => c >= '0' && c <= '9' || c >= 'a' && c <= 'f');
         internal static bool Text(string value, int max) => !string.IsNullOrWhiteSpace(value) && value.Length <= max && !value.Any(c => char.IsControl(c) && c != '\n' && c != '\t');
-        internal static string ReceiptMessage(string value)
-        {
-            string text = (value ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
-            text = new string(text.Select(c => char.IsControl(c) && c != '\n' && c != '\t' ? ' ' : c).ToArray());
-            if (string.IsNullOrWhiteSpace(text)) return "Unity reported a final import outcome.";
-            if (text.Length > 4000) text = text.Substring(0, char.IsHighSurrogate(text[3999]) ? 3999 : 4000);
-            return text;
-        }
         internal static bool Id(string value) => Text(value, 100) && value.Contains(".") && Regex.IsMatch(value, @"^[a-z0-9][a-z0-9.-]*\z");
         internal static bool Version(string value) => Text(value, 80) && Regex.IsMatch(value, @"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\z");
         internal static bool RepositoryPath(string value) => value != null && value.Length <= 500 && value.Contains("/") && value.Split('/').All(p => Regex.IsMatch(p, @"^[A-Za-z0-9_-][A-Za-z0-9._-]*\z"));
@@ -356,161 +347,6 @@ namespace CreatorWorks.Plugins
         }
     }
 
-    // Match fs2's nonblocking lock so Unity and all desktop writers share one queue boundary.
-    internal sealed class PluginQueueLock : IDisposable
-    {
-        [StructLayout(LayoutKind.Sequential)]
-        private struct Overlapped { public UIntPtr internalLow, internalHigh; public uint offset, offsetHigh; public IntPtr eventHandle; }
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool LockFileEx(Microsoft.Win32.SafeHandles.SafeFileHandle file, uint flags, uint reserved, uint low, uint high, ref Overlapped overlapped);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool UnlockFile(Microsoft.Win32.SafeHandles.SafeFileHandle file, uint offset, uint offsetHigh, uint low, uint high);
-        [DllImport("libc", EntryPoint = "flock", SetLastError = true)]
-        private static extern int Flock(int file, int operation);
-        private FileStream stream;
-        private readonly bool windows;
-        internal PluginQueueLock(string project)
-        {
-            string path = PluginProtocol.Area(project, "desktop.lock");
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
-            PluginProtocol.Area(project, "desktop.lock");
-            windows = Environment.OSVersion.Platform == PlatformID.Win32NT;
-            if (!windows && Environment.OSVersion.Platform != PlatformID.Unix && Environment.OSVersion.Platform != PlatformID.MacOSX)
-                throw new PlatformNotSupportedException("Plugin queue locking is unavailable on this platform.");
-            stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
-            try
-            {
-                var overlapped = new Overlapped();
-                bool locked = windows ? LockFileEx(stream.SafeFileHandle, 3, 0, uint.MaxValue, uint.MaxValue, ref overlapped) : Flock(stream.SafeFileHandle.DangerousGetHandle().ToInt32(), 2 | 4) == 0;
-                if (!locked) throw new IOException("Another Creator app is using the plugin queue, or its lock is unavailable. Try again after it finishes. OS error " + Marshal.GetLastWin32Error() + ".");
-            }
-            catch { stream.Dispose(); stream = null; throw; }
-        }
-        public void Dispose()
-        {
-            if (stream == null) return;
-            try
-            {
-                if (windows) UnlockFile(stream.SafeFileHandle, 0, 0, uint.MaxValue, uint.MaxValue);
-                else Flock(stream.SafeFileHandle.DangerousGetHandle().ToInt32(), 8);
-            }
-            finally { stream.Dispose(); stream = null; }
-        }
-    }
-
-    internal static class PluginQueue
-    {
-        internal const int ActiveLimit = 100, ScanLimit = 1000;
-        private sealed class Item { internal ImportRequest request; internal byte[] bytes, finalBytes; }
-        private static T Read<T>(byte[] bytes) => JsonUtility.FromJson<T>(Encoding.UTF8.GetString(bytes));
-        private static bool Exists(string path)
-        {
-            try
-            {
-                var attributes = File.GetAttributes(path);
-                if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
-                    throw new InvalidDataException("Linked paths or folders cannot replace plugin records.");
-                return true;
-            }
-            catch (FileNotFoundException) { return false; }
-            catch (DirectoryNotFoundException) { return false; }
-        }
-        internal static ImportReceipt TerminalReceipt(string project, string id) => Receipt(project, id, out _);
-        private static ImportReceipt Receipt(string project, string id, out byte[] bytes)
-        {
-            if (!PluginProtocol.Hex(id, 32)) throw new InvalidDataException("Invalid import request identifier.");
-            string path = PluginProtocol.Area(project, "receipts/" + id + ".json");
-            bytes = null;
-            if (!Exists(path)) return null;
-            bytes = PluginProtocol.ReadBounded(path, 16 * 1024);
-            var receipt = Read<ImportReceipt>(bytes);
-            if (receipt == null || receipt.schemaVersion != 1 || receipt.requestId != id || !PluginProtocol.Text(receipt.message, 4000))
-                throw new InvalidDataException("Invalid import receipt. Existing data was preserved.");
-            if (!new[] { "imported", "cancelled", "failed" }.Contains(receipt.status))
-                throw new InvalidDataException("This request has an older or invalid receipt. Existing data was preserved; no import was started.");
-            return receipt;
-        }
-        private static List<Item> Inspect(string project)
-        {
-            string folder = PluginProtocol.Area(project, "inbox");
-            var result = new List<Item>();
-            if (!Directory.Exists(folder))
-            {
-                if (Exists(folder)) throw new InvalidDataException("Plugin inbox must be a directory.");
-                return result;
-            }
-            foreach (string file in Directory.EnumerateFileSystemEntries(folder).Take(ScanLimit + 1))
-            {
-                if (result.Count == ScanLimit) throw new InvalidDataException("The plugin inbox exceeds its inspection limit. Existing files were preserved.");
-                string id = Path.GetFileNameWithoutExtension(file);
-                if (!PluginProtocol.Hex(id, 32) || Path.GetFileName(file) != id + ".json" || !Exists(PluginProtocol.Area(project, "inbox/" + id + ".json")))
-                    throw new InvalidDataException("An existing plugin inbox entry is invalid. Existing files were preserved.");
-                var item = new Item { bytes = PluginProtocol.ReadBounded(file, 16 * 1024) };
-                item.request = Read<ImportRequest>(item.bytes);
-                PluginProtocol.ValidateRequest(item.request, project);
-                if (item.request.requestId != id) throw new InvalidDataException("Plugin inbox filename does not match its request.");
-                Receipt(project, id, out item.finalBytes);
-                if (Exists(PluginProtocol.Area(project, "history/requests/" + id + ".json")))
-                    throw new InvalidDataException("This request exists in both inbox and history. Nothing was overwritten.");
-                result.Add(item);
-            }
-            return result;
-        }
-        internal static ImportRequest Find(string project, string id)
-        {
-            if (!PluginProtocol.Hex(id, 32)) throw new InvalidDataException("Invalid import request identifier.");
-            using (new PluginQueueLock(project))
-            {
-                string inbox = PluginProtocol.Area(project, "inbox/" + id + ".json"), history = PluginProtocol.Area(project, "history/requests/" + id + ".json");
-                bool current = Exists(inbox), archived = Exists(history);
-                if (current == archived) throw new InvalidDataException("Import request is missing or has conflicting history.");
-                var request = Read<ImportRequest>(PluginProtocol.ReadBounded(current ? inbox : history, 16 * 1024));
-                PluginProtocol.ValidateRequest(request, project);
-                if (request.requestId != id) throw new InvalidDataException("Import request identity changed.");
-                var final = TerminalReceipt(project, id);
-                if (archived && final == null) throw new InvalidDataException("Archived request has no valid final receipt. Its outcome is unknown.");
-                return request;
-            }
-        }
-        internal static void Enqueue(string project, ImportRequest request, byte[] package = null)
-        {
-            PluginProtocol.ValidateRequest(request, project);
-            if (package != null) PluginProtocol.Verify(package, request.byteLength, request.sha256);
-            byte[] requestBytes = Encoding.UTF8.GetBytes(JsonUtility.ToJson(request));
-            if (requestBytes.Length > 16 * 1024) throw new InvalidDataException("Import request exceeds its metadata limit.");
-            using (new PluginQueueLock(project))
-            {
-                // Validate the entire bounded snapshot before moving any history or saving a request.
-                var items = Inspect(project);
-                var unresolved = items.Where(item => item.finalBytes == null).ToArray();
-                if (unresolved.Length >= ActiveLimit) throw new InvalidOperationException("The plugin inbox has 100 unresolved requests. Finish an existing import before adding another.");
-                if (unresolved.Any(item => item.request.packageId == request.packageId))
-                    throw new InvalidOperationException("This package already has an unresolved Unity request. Finish or cancel that request first.");
-                foreach (string relative in new[] { "inbox/", "history/requests/", "receipts/" })
-                    if (Exists(PluginProtocol.Area(project, relative + request.requestId + ".json"))) throw new InvalidDataException("Import request identifier already exists. Nothing was overwritten.");
-                string cache = PluginProtocol.Area(project, "packages/" + request.packageFile);
-                if (Exists(cache)) PluginProtocol.Verify(PluginProtocol.ReadBounded(cache, PluginProtocol.MaxPackage), request.byteLength, request.sha256);
-                else if (package == null) throw new InvalidDataException("The checked package is missing. Nothing was queued.");
-                foreach (var item in items.Where(value => value.finalBytes != null))
-                {
-                    string source = PluginProtocol.Area(project, "inbox/" + item.request.requestId + ".json");
-                    string destination = PluginProtocol.Area(project, "history/requests/" + item.request.requestId + ".json");
-                    if (!PluginProtocol.ReadBounded(source, 16 * 1024).SequenceEqual(item.bytes) || !PluginProtocol.ReadBounded(PluginProtocol.Area(project, "receipts/" + item.request.requestId + ".json"), 16 * 1024).SequenceEqual(item.finalBytes))
-                        throw new InvalidDataException("Plugin history changed during review. No import was queued.");
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination));
-                    PluginProtocol.Area(project, "history/requests/" + item.request.requestId + ".json");
-                    File.Move(source, destination);
-                    if (!PluginProtocol.ReadBounded(destination, 16 * 1024).SequenceEqual(item.bytes))
-                        throw new InvalidDataException("Plugin request changed during archival. Inspect its preserved history before continuing.");
-                }
-                if (!Exists(cache)) PluginProtocol.SaveNew(project, "packages/" + request.packageFile, package);
-                PluginProtocol.SaveNew(project, "inbox/" + request.requestId + ".json", requestBytes);
-            }
-        }
-    }
-
     [InitializeOnLoad]
     internal static class ImportReview
     {
@@ -546,8 +382,8 @@ namespace CreatorWorks.Plugins
         internal static ImportReceipt Receipt(ImportRequest request)
         {
             PluginProtocol.ValidateRequest(request, Project);
-            var receipt = PluginQueue.TerminalReceipt(Project, request.requestId);
-            if (receipt == null)
+            string path = PluginProtocol.Area(Project, "receipts/" + request.requestId + ".json");
+            if (!File.Exists(path))
             {
                 string activePath = PluginProtocol.Area(Project, "active-review.json");
                 if (File.Exists(activePath))
@@ -562,6 +398,9 @@ namespace CreatorWorks.Plugins
                 }
                 return new ImportReceipt { requestId = request.requestId, status = "queued", message = "Ready for your review. Nothing imported." };
             }
+            var receipt = Read<ImportReceipt>(path);
+            if (receipt == null || receipt.schemaVersion != 1 || receipt.requestId != request.requestId || !PluginProtocol.Text(receipt.message, 4000) || !new[] { "queued", "review", "imported", "cancelled", "failed" }.Contains(receipt.status)) throw new InvalidDataException("Invalid import receipt. Existing data was preserved.");
+            if (receipt.status == "queued" || receipt.status == "review") throw new InvalidDataException("This request has an older helper receipt. Existing data was preserved; no import was started.");
             return receipt;
         }
         private static void RequireSameRequest(ImportRequest saved, ImportRequest expected)
@@ -574,6 +413,8 @@ namespace CreatorWorks.Plugins
         {
             if (Busy) throw new InvalidOperationException("Wait for Unity to finish, or resolve the pending review first.");
             if (Receipt(request).status != "queued") throw new InvalidOperationException("This request has already been reviewed. No automatic retry is allowed.");
+            if (!EditorUtility.DisplayDialog("Review community package", "Packages can contain C# that runs on import. A checksum does not prove safety. Review the selected files and any replacements in Unity's import dialog. This helper will not save or open scenes.", "Review files", "Cancel")) return;
+            if (Busy) throw new InvalidOperationException("Unity became busy. Try again after it settles.");
             packageLock = PluginProtocol.LockPackage(request, Project);
             try
             {
@@ -614,7 +455,7 @@ namespace CreatorWorks.Plugins
                 PluginProtocol.ValidateRequest(saved, Project);
                 RequireSameRequest(saved, Active);
                 if (!new[] { "imported", "cancelled", "failed" }.Contains(status)) throw new InvalidDataException("Only a final outcome can be recorded.");
-                var receipt = new ImportReceipt { requestId = Active.requestId, status = status, message = PluginProtocol.ReceiptMessage(message) };
+                var receipt = new ImportReceipt { requestId = Active.requestId, status = status, message = message.Length <= 4000 ? message : message.Substring(0, 4000) };
                 PluginProtocol.SaveNew(Project, "receipts/" + Active.requestId + ".json", Encoding.UTF8.GetBytes(JsonUtility.ToJson(receipt)));
                 File.Delete(path);
                 Active = null; Recovered = false; RecoveryError = null;
@@ -633,15 +474,10 @@ namespace CreatorWorks.Plugins
         private readonly List<ImportRequest> inbox = new List<ImportRequest>();
         private readonly Dictionary<string, ImportReceipt> receipts = new Dictionary<string, ImportReceipt>();
         private Listing selected;
-        private Listing pendingImport;
         private string search = "", message = "", queueMessage = "";
         private int category, tab;
         private Vector2 scroll;
-        private readonly Dictionary<string, Texture2D> previews = new Dictionary<string, Texture2D>();
-        private readonly HashSet<string> previewAttempts = new HashSet<string>();
-        private UnityWebRequest previewRequest;
-        private string previewKey;
-        private double previewDeadline;
+        private Texture2D preview;
         private UnityWebRequest request;
         private Action<byte[]> success;
         private Action<string> failure;
@@ -649,18 +485,17 @@ namespace CreatorWorks.Plugins
         private bool catalogueFresh;
         private string[] pendingListings;
         private int listingIndex, warnings;
-        private GUIStyle wrapped, heading, cardTitle, cardAuthor, previewLabel;
+        private GUIStyle wrapped, heading;
         private bool Fresh => catalogueFresh && EditorApplication.timeSinceStartup - catalogueLoadedAt < 180;
 
         [MenuItem("Creator Plugins/Browse")]
         public static void Browse() { var window = GetWindow<CreatorPluginsWindow>("Creator Plugins"); window.minSize = new Vector2(360, 360); window.Show(); }
         private void OnEnable() { EditorApplication.update += Tick; EditorApplication.delayCall += LoadWhenOpened; nextPoll = 0; }
-        private void OnDisable() { EditorApplication.update -= Tick; EditorApplication.delayCall -= LoadWhenOpened; StopDownload(); ClearPreviews(); }
+        private void OnDisable() { EditorApplication.update -= Tick; EditorApplication.delayCall -= LoadWhenOpened; StopDownload(); if (preview != null) DestroyImmediate(preview); preview = null; }
         private void LoadWhenOpened() { if (this != null && listings.Count == 0 && request == null && !ImportReview.Busy) RefreshCatalogue(); }
         private void StopDownload() { if (request != null) { request.Abort(); request.Dispose(); request = null; } success = null; failure = null; }
         private void Tick()
         {
-            TickPreview();
             if (request != null)
             {
                 if (!request.isDone && EditorApplication.timeSinceStartup > deadline) request.Abort();
@@ -677,8 +512,7 @@ namespace CreatorWorks.Plugins
                     finally { current.Dispose(); Repaint(); }
                 }
             }
-            bool importFinished = ImportReview.Active == null && ImportReview.RecoveryError == null && receipts.Values.Any(value => value.status == "review");
-            if ((EditorApplication.timeSinceStartup >= nextPoll || importFinished) && !ImportReview.EditorBusy && request == null)
+            if (EditorApplication.timeSinceStartup >= nextPoll && !ImportReview.EditorBusy && request == null)
             {
                 nextPoll = EditorApplication.timeSinceStartup + 5;
                 PollInbox(); Repaint();
@@ -696,13 +530,13 @@ namespace CreatorWorks.Plugins
         private void RefreshCatalogue()
         {
             if (request != null || ImportReview.Busy) return;
-            catalogueFresh = false; message = "Loading catalogue..."; listings.Clear(); selected = null; ClearPreviews(); warnings = 0;
+            catalogueFresh = false; message = "Loading catalogue..."; listings.Clear(); selected = null; ClearPreview(); warnings = 0;
             Fetch(PluginProtocol.Root + "index.json", 32 * 1024, bytes =>
             {
                 var index = JsonUtility.FromJson<CatalogueIndex>(Encoding.UTF8.GetString(bytes));
                 if (index == null || index.schemaVersion != 1 || index.entries == null || index.entries.Length > 50) throw new InvalidDataException("Invalid catalogue index.");
                 pendingListings = index.entries; listingIndex = 0; catalogueDeadline = EditorApplication.timeSinceStartup + 30; NextListing();
-            }, error => { message = error; catalogueFresh = false; pendingImport = null; });
+            }, error => { message = error; catalogueFresh = false; });
         }
         private void NextListing()
         {
@@ -711,14 +545,7 @@ namespace CreatorWorks.Plugins
                 catalogueFresh = listingIndex >= pendingListings.Length && warnings == 0;
                 catalogueLoadedAt = EditorApplication.timeSinceStartup;
                 listings.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.OrdinalIgnoreCase));
-                message = catalogueFresh ? (listings.Count == 0 ? "No contributions are listed yet." : listings.Count + (listings.Count == 1 ? " contribution" : " contributions")) : "Some listings could not be loaded. Refresh before downloading.";
-                if (pendingImport != null)
-                {
-                    var expected = pendingImport; pendingImport = null;
-                    var current = listings.FirstOrDefault(entry => SameDownload(entry, expected));
-                    if (catalogueFresh && current != null && PluginProtocol.CanImport(current)) { selected = current; Download(current); }
-                    else message = "The catalogue changed or could not be verified. No import started. Refresh and choose the contribution again.";
-                }
+                message = catalogueFresh ? (listings.Count == 0 ? "No contributions are listed yet." : listings.Count + " contributions") : "Some listings could not be loaded. Refresh before downloading.";
                 return;
             }
             string path = pendingListings[listingIndex++];
@@ -741,12 +568,6 @@ namespace CreatorWorks.Plugins
         }
         private void PollInbox()
         {
-            try { using (new PluginQueueLock(ImportReview.Project)) PollInboxLocked(); }
-            catch (Exception error) { queueMessage = error.Message; }
-        }
-        private void PollInboxLocked()
-        {
-            var pending = new HashSet<string>(receipts.Where(pair => pair.Value.status == "review").Select(pair => pair.Key));
             inbox.Clear(); receipts.Clear(); queueMessage = "";
             try
             {
@@ -763,9 +584,7 @@ namespace CreatorWorks.Plugins
                         var entry = ImportReview.Read<ImportRequest>(PluginProtocol.Area(ImportReview.Project, "inbox/" + id + ".json"));
                         PluginProtocol.ValidateRequest(entry, ImportReview.Project);
                         if (entry.requestId != id) throw new InvalidDataException();
-                        var receipt = ImportReview.Acknowledge(entry);
-                        receipts[entry.requestId] = receipt;
-                        if (pending.Contains(entry.requestId) && receipt.status != "review") message = receipt.status == "cancelled" ? "Import cancelled. You can try again." : receipt.message;
+                        receipts[entry.requestId] = ImportReview.Acknowledge(entry);
                         inbox.Add(entry);
                     }
                     catch { queueMessage = "Some requests were invalid or unreadable. Their files were preserved."; }
@@ -773,145 +592,53 @@ namespace CreatorWorks.Plugins
             }
             catch (Exception error) { queueMessage = error.Message; }
         }
-        private void ClearPreviews()
+        private void ClearPreview() { if (preview != null) DestroyImmediate(preview); preview = null; }
+        private void Select(Listing entry)
         {
-            if (previewRequest != null) { previewRequest.Abort(); previewRequest.Dispose(); previewRequest = null; }
-            foreach (var texture in previews.Values) if (texture != null) DestroyImmediate(texture);
-            previews.Clear(); previewAttempts.Clear(); previewKey = null;
-        }
-        private void RequestPreview(Listing entry)
-        {
-            string key = entry.previewImage;
-            if (string.IsNullOrEmpty(key) || previewRequest != null || previewAttempts.Contains(key)) return;
-            previewAttempts.Add(key);
-            string url = PluginProtocol.RepositoryPath(key) ? PluginProtocol.RepositoryUrl(key) : key;
-            if (!PluginProtocol.WebUrl(url)) return;
-            previewRequest = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET) { downloadHandler = new BoundedDownload(2 * 1024 * 1024), timeout = 25, redirectLimit = 0 };
-            previewKey = key; previewDeadline = EditorApplication.timeSinceStartup + 27;
-            try { previewRequest.SendWebRequest(); }
-            catch { previewRequest.Dispose(); previewRequest = null; previewKey = null; }
-        }
-        private void TickPreview()
-        {
-            if (previewRequest == null) return;
-            if (!previewRequest.isDone && EditorApplication.timeSinceStartup > previewDeadline) previewRequest.Abort();
-            if (!previewRequest.isDone) return;
-            Texture2D texture = null;
-            try
+            selected = entry; ClearPreview();
+            if (string.IsNullOrEmpty(entry.previewImage) || request != null) return;
+            string url = PluginProtocol.RepositoryPath(entry.previewImage) ? PluginProtocol.RepositoryUrl(entry.previewImage) : entry.previewImage;
+            Fetch(url, 2 * 1024 * 1024, bytes =>
             {
-                if (previewRequest.result != UnityWebRequest.Result.Success || previewRequest.responseCode != 200) return;
-                byte[] bytes = ((BoundedDownload)previewRequest.downloadHandler).Bytes();
                 if (!PluginProtocol.ImageDimensions(bytes)) throw new InvalidDataException("Preview dimensions or format are unsupported.");
-                texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave };
-                if (!texture.LoadImage(bytes, true)) throw new InvalidDataException("Preview unavailable.");
-                // At most 50 listings, each retaining only a 320px thumbnail, never full-size images.
-                if (texture.width > 320 || texture.height > 320)
-                {
-                    Texture2D thumbnail = MakeThumbnail(texture);
-                    DestroyImmediate(texture); texture = thumbnail;
-                }
-                previews[previewKey] = texture; texture = null;
-            }
-            catch { /* A failed image must not hide the listing or disable its actions. */ }
-            finally
-            {
-                if (texture != null) DestroyImmediate(texture);
-                previewRequest.Dispose(); previewRequest = null; previewKey = null; Repaint();
-            }
-        }
-        private static Texture2D MakeThumbnail(Texture2D source)
-        {
-            float scale = Mathf.Min(1f, 320f / Mathf.Max(source.width, source.height));
-            int width = Mathf.Max(1, Mathf.RoundToInt(source.width * scale)), height = Mathf.Max(1, Mathf.RoundToInt(source.height * scale));
-            var target = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
-            var previous = RenderTexture.active;
-            Texture2D result = null;
-            try
-            {
-                Graphics.Blit(source, target); RenderTexture.active = target;
-                result = new Texture2D(width, height, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave };
-                result.ReadPixels(new Rect(0, 0, width, height), 0, 0); result.Apply(false, true);
-                return result;
-            }
-            catch { if (result != null) DestroyImmediate(result); throw; }
-            finally { RenderTexture.active = previous; RenderTexture.ReleaseTemporary(target); }
-        }
-        internal static bool SameDownload(Listing a, Listing b) => a != null && b != null && a.id == b.id && a.version == b.version && a.download != null && b.download != null && a.download.sha256 == b.download.sha256 && a.download.byteLength == b.download.byteLength;
-        private void Import(Listing entry)
-        {
-            if (ImportReview.Busy || request != null) return;
-            if (!PluginProtocol.CanImport(entry)) { message = "This contribution is not available for Unity import. Follow its instructions instead."; return; }
-            if (!Fresh) { pendingImport = entry; RefreshCatalogue(); message = "Checking the latest catalogue before importing..."; return; }
-            Download(entry);
+                if (selected != entry) return;
+                var texture = new Texture2D(2, 2);
+                if (!texture.LoadImage(bytes, true)) { DestroyImmediate(texture); throw new InvalidDataException("Preview unavailable."); }
+                preview = texture;
+            }, error => message = "Preview unavailable. " + error);
         }
         private void Download(Listing entry)
         {
             if (!Fresh || ImportReview.Busy || request != null || entry.reviewStatus != "listed") return;
             if (!PluginProtocol.CanImport(entry)) { message = "This item is not a Unity import. Use the desktop download and follow the contributor instructions."; return; }
-            try
+            string url = PluginProtocol.DownloadUrl(entry.download);
+            message = "Downloading verified package to the project cache, outside Assets...";
+            Fetch(url, entry.download.byteLength, bytes =>
             {
+                PluginProtocol.Verify(bytes, entry.download.byteLength, entry.download.sha256);
                 string filename = entry.download.sha256 + ".unitypackage", relative = "packages/" + filename;
                 string cached = PluginProtocol.Area(ImportReview.Project, relative);
-                if (File.Exists(cached))
-                {
-                    PluginProtocol.Verify(PluginProtocol.ReadBounded(cached, PluginProtocol.MaxPackage), entry.download.byteLength, entry.download.sha256);
-                    OpenImport(entry, filename);
-                    return;
-                }
-                message = "Downloading package and checking its checksum...";
-                Fetch(PluginProtocol.DownloadUrl(entry.download), entry.download.byteLength, bytes =>
-                {
-                    PluginProtocol.Verify(bytes, entry.download.byteLength, entry.download.sha256);
-                    OpenImport(entry, filename, bytes);
-                }, error => message = error);
-            }
-            catch (Exception error) { message = error.Message; }
+                if (File.Exists(cached)) PluginProtocol.Verify(PluginProtocol.ReadBounded(cached, PluginProtocol.MaxPackage), entry.download.byteLength, entry.download.sha256);
+                else PluginProtocol.SaveNew(ImportReview.Project, relative, bytes);
+                var item = new ImportRequest { requestId = Guid.NewGuid().ToString("N"), projectPath = ImportReview.Project, packageId = entry.id, version = entry.version, name = entry.name, byteLength = entry.download.byteLength, sha256 = entry.download.sha256, packageFile = filename };
+                PluginProtocol.ValidateRequest(item, ImportReview.Project);
+                PluginProtocol.SaveNew(ImportReview.Project, "inbox/" + item.requestId + ".json", Encoding.UTF8.GetBytes(JsonUtility.ToJson(item)));
+                message = "Downloaded and checked. Nothing imported. Review the queued package when ready."; tab = 1; PollInbox();
+            }, error => message = error);
         }
-        private void OpenImport(Listing entry, string filename, byte[] package = null)
-        {
-            var item = QueueImport(entry, filename, package);
-            tab = 1; PollInbox();
-            if (ImportReview.Busy) { message = "Package is ready. Wait for Unity to finish, then click Import into project."; return; }
-            ImportReview.Review(item);
-            message = "Choose the files to add in Unity's import window."; nextPoll = 0;
-        }
-        internal static ImportRequest QueueImport(Listing entry, string filename, byte[] package = null)
-        {
-            if (!PluginProtocol.CanImport(entry)) throw new InvalidDataException("This contribution is not available for Unity import.");
-            var item = new ImportRequest { requestId = Guid.NewGuid().ToString("N"), projectPath = ImportReview.Project, packageId = entry.id, version = entry.version, name = entry.name, byteLength = entry.download.byteLength, sha256 = entry.download.sha256, packageFile = filename };
-            PluginProtocol.ValidateRequest(item, ImportReview.Project);
-            PluginQueue.Enqueue(ImportReview.Project, item, package);
-            return item;
-        }
-        private void RetryImport(ImportRequest item)
-        {
-            var entry = listings.FirstOrDefault(value => PluginProtocol.CanImport(value) && value.id == item.packageId && value.version == item.version && value.download.sha256 == item.sha256 && value.download.byteLength == item.byteLength);
-            if (entry == null) { message = "Refresh the catalogue and choose the current contribution before importing again."; tab = 0; return; }
-            Import(entry);
-        }
-        private void CancelDownload() { StopDownload(); pendingImport = null; message = "Download cancelled. You can try again."; }
         private void Link(string url) { if (PluginProtocol.WebUrl(url)) Application.OpenURL(url); else message = "Unapproved community link."; }
         private void OnGUI()
         {
-            if (wrapped == null)
-            {
-                wrapped = new GUIStyle(EditorStyles.wordWrappedLabel) { richText = false };
-                heading = new GUIStyle(EditorStyles.boldLabel) { wordWrap = true, richText = false, fontSize = 16 };
-                cardTitle = new GUIStyle(EditorStyles.boldLabel) { wordWrap = true, richText = false, fontSize = 13 };
-                cardAuthor = new GUIStyle(EditorStyles.miniLabel) { wordWrap = true, richText = false };
-                previewLabel = new GUIStyle(EditorStyles.centeredGreyMiniLabel) { wordWrap = true, richText = false };
-            }
+            if (wrapped == null) { wrapped = new GUIStyle(EditorStyles.wordWrappedLabel) { richText = false }; heading = new GUIStyle(EditorStyles.boldLabel) { wordWrap = true, richText = false, fontSize = 16 }; }
             GUILayout.Space(8); GUILayout.Label("Creator Plugins", heading);
-            tab = GUILayout.Toolbar(tab, new[] { "Catalogue", "Imports" });
-            EditorGUILayout.HelpBox("Packages may run C# on import. Checksums confirm file integrity, not code safety.", MessageType.Info);
-            if (ImportReview.EditorBusy) EditorGUILayout.HelpBox("Unity is busy or in Play mode. Importing is unavailable.", MessageType.Info);
+            tab = GUILayout.Toolbar(tab, new[] { "Catalogue", "Queued packages" });
+            if (ImportReview.EditorBusy) EditorGUILayout.HelpBox("Unity is busy or in Play mode. Import review is unavailable.", MessageType.Info);
             if (ImportReview.RecoveryError != null) EditorGUILayout.HelpBox(ImportReview.RecoveryError, MessageType.Warning);
             if (ImportReview.Active != null)
             {
-                EditorGUILayout.HelpBox(ImportReview.Recovered ? "Previous import restored. Its outcome is not confirmed; nothing was retried." : "Finish or cancel Unity's import window.", MessageType.Info);
-                using (new EditorGUI.DisabledScope(ImportReview.EditorBusy)) if (GUILayout.Button("Clear unconfirmed import...")) ImportReview.ClearUnconfirmed();
+                EditorGUILayout.HelpBox(ImportReview.Recovered ? "Previous import review restored. Its outcome is not confirmed; nothing was retried." : "Import review is pending. Finish or cancel Unity's import dialog.", MessageType.Info);
+                using (new EditorGUI.DisabledScope(ImportReview.EditorBusy)) if (GUILayout.Button("Clear unconfirmed review...")) ImportReview.ClearUnconfirmed();
             }
-            if (request != null && GUILayout.Button("Cancel download")) CancelDownload();
             scroll = EditorGUILayout.BeginScrollView(scroll);
             if (tab == 0) DrawCatalogue(); else DrawInbox();
             EditorGUILayout.EndScrollView();
@@ -923,55 +650,18 @@ namespace CreatorWorks.Plugins
             using (new EditorGUI.DisabledScope(request != null || ImportReview.Busy)) if (GUILayout.Button("Refresh catalogue")) RefreshCatalogue();
             search = EditorGUILayout.TextField("Search", search);
             category = EditorGUILayout.Popup("Type", category, Categories);
-            int visibleCount = 0;
-            foreach (var entry in listings.Where(e => (category == 0 || e.category == CategoryKeys[category]) && (e.name + " " + e.description + " " + e.author.name + " " + e.author.discord).IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0).ToArray())
+            foreach (var entry in listings.Where(e => (category == 0 || e.category == CategoryKeys[category]) && (e.name + " " + e.description + " " + e.author.name + " " + e.author.discord).IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0))
             {
-                visibleCount++;
-                GUILayout.Space(6);
-                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                EditorGUILayout.BeginHorizontal();
-                Rect imageRect = GUILayoutUtility.GetRect(108, 81, GUILayout.Width(108), GUILayout.Height(81));
-                DrawCardPreview(entry, imageRect);
-                EditorGUILayout.BeginVertical();
-                GUILayout.Label(new GUIContent(entry.name, entry.name), cardTitle);
-                GUILayout.Label("By " + entry.author.name + (string.IsNullOrEmpty(entry.author.discord) ? "" : " / " + entry.author.discord), cardAuthor);
-                GUILayout.Space(3);
-                GUILayout.Label(Summary(entry.description), wrapped);
-                EditorGUILayout.EndVertical();
-                EditorGUILayout.EndHorizontal();
-                EditorGUILayout.BeginHorizontal();
-                using (new EditorGUI.DisabledScope(request != null || ImportReview.Busy || !PluginProtocol.CanImport(entry)))
-                    if (GUILayout.Button("Import into project")) Import(entry);
-                if (GUILayout.Button(selected == entry ? "Hide details" : "Details", GUILayout.Width(92))) selected = selected == entry ? null : entry;
-                EditorGUILayout.EndHorizontal();
-                if (selected == entry) DrawDetails();
-                EditorGUILayout.EndVertical();
+                using (new EditorGUI.DisabledScope(request != null)) if (GUILayout.Button(entry.name, EditorStyles.miniButton)) Select(entry);
             }
-            if (visibleCount == 0 && listings.Count > 0) EditorGUILayout.HelpBox("No contributions match these filters.", MessageType.Info);
-        }
-        internal static string Summary(string description)
-        {
-            string text = (description ?? "").Replace('\r', ' ').Replace('\n', ' ');
-            if (text.Length <= 200) return text;
-            int end = text.LastIndexOf(' ', 197, 60);
-            return text.Substring(0, end >= 138 ? end : 197).TrimEnd() + "...";
-        }
-        private void DrawCardPreview(Listing entry, Rect rect)
-        {
-            if (Event.current.type != EventType.Repaint) return;
-            EditorGUI.DrawRect(rect, EditorGUIUtility.isProSkin ? new Color(.09f, .10f, .11f) : new Color(.72f, .73f, .74f));
-            string key = entry.previewImage;
-            if (!string.IsNullOrEmpty(key) && previews.TryGetValue(key, out var texture)) GUI.DrawTexture(rect, texture, ScaleMode.ScaleToFit);
-            else
+            if (selected == null) return;
+            GUILayout.Space(10); GUILayout.Label(selected.name, heading);
+            GUILayout.Label("By " + selected.author.name + (string.IsNullOrEmpty(selected.author.discord) ? "" : " / " + selected.author.discord), wrapped);
+            if (preview != null)
             {
-                bool attempted = !string.IsNullOrEmpty(key) && previewAttempts.Contains(key);
-                GUI.Label(rect, string.IsNullOrEmpty(key) ? "No preview" : attempted && key != previewKey ? "Preview unavailable" : "Loading preview...", previewLabel);
-                if (rect.yMax >= scroll.y && rect.yMin <= scroll.y + position.height) RequestPreview(entry);
+                Rect rect = GUILayoutUtility.GetRect(100, 220, GUILayout.ExpandWidth(true));
+                EditorGUI.DrawPreviewTexture(rect, preview, null, ScaleMode.ScaleToFit);
             }
-        }
-        private void DrawDetails()
-        {
-            GUILayout.Space(8);
             GUILayout.Label(selected.description, wrapped);
             GUILayout.Label(selected.reviewStatus == "listed" ? "Listed contribution" : "Review pending", EditorStyles.boldLabel);
             GUILayout.Label("Licence: " + selected.license, wrapped);
@@ -983,6 +673,7 @@ namespace CreatorWorks.Plugins
             GUILayout.Label(selected.testNotes, wrapped);
             if (selected.contents != null) foreach (string file in selected.contents) GUILayout.Label(file, wrapped);
             if (selected.includesCode) EditorGUILayout.HelpBox("Review code before installing or running it. Unity C# can run on import; a checksum is not a safety check.", MessageType.Warning);
+            using (new EditorGUI.DisabledScope(!Fresh || request != null || ImportReview.Busy || !PluginProtocol.CanImport(selected))) if (GUILayout.Button("Download for review")) Download(selected);
             if (GUILayout.Button("Full instructions")) Link(PluginProtocol.Repository + "/blob/main/" + selected.instructionsPath);
             if (GUILayout.Button("Licence notes")) Link(PluginProtocol.Repository + "/blob/main/" + selected.licensePath);
             if (!string.IsNullOrEmpty(selected.sourceUrl) && GUILayout.Button("Source")) Link(selected.sourceUrl);
@@ -993,22 +684,16 @@ namespace CreatorWorks.Plugins
         {
             GUILayout.Label("Packages stay outside Assets until you approve files in Unity's import dialog.", wrapped);
             if (!string.IsNullOrEmpty(queueMessage)) EditorGUILayout.HelpBox(queueMessage, MessageType.Warning);
-            if (inbox.Count == 0) GUILayout.Label("No imports yet.", wrapped);
-            foreach (var item in inbox.ToArray())
+            if (inbox.Count == 0) GUILayout.Label("No queued packages.", wrapped);
+            foreach (var item in inbox)
             {
                 GUILayout.Space(8); GUILayout.Label(item.name + " / " + item.version, EditorStyles.boldLabel);
                 try
                 {
                     var receipt = receipts[item.requestId];
-                    GUILayout.Label(receipt.status == "review" ? "Waiting for your selection in Unity's import window." : receipt.status == "queued" ? "Ready to import." : receipt.status + ": " + receipt.message, wrapped);
-                    bool retry = receipt.status == "cancelled" || receipt.status == "failed";
-                    using (new EditorGUI.DisabledScope(ImportReview.Busy || request != null || (receipt.status != "queued" && !retry)))
-                        if (GUILayout.Button(retry ? "Try import again" : "Import into project"))
-                        {
-                            try { if (retry) RetryImport(item); else ImportReview.Review(item); }
-                            catch (Exception error) { message = error.Message; }
-                            nextPoll = 0;
-                        }
+                    GUILayout.Label(receipt.status + ": " + receipt.message, wrapped);
+                    using (new EditorGUI.DisabledScope(ImportReview.Busy || request != null || receipt.status != "queued"))
+                        if (GUILayout.Button("Review import...")) { try { ImportReview.Review(item); } catch (Exception error) { message = error.Message; } nextPoll = 0; }
                 }
                 catch (Exception error) { GUILayout.Label(error.Message, wrapped); }
             }
