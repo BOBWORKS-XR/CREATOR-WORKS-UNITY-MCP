@@ -95,14 +95,14 @@ try {
   const communityDenied = await frame.locator('body').evaluate(async () => {
     window.CreatorMcpViews.show('plugins');
     const results = [];
-    for (const command of ['community_catalogue', 'open_community_link', 'download_community_package']) {
+    for (const command of ['community_catalogue', 'open_community_link', 'download_community_package', 'community_projects', 'choose_community_project', 'install_community_menu', 'queue_community_import', 'community_import_status']) {
       for (const invoke of [window.CreatorCommunityInvoke, window.CreatorRuntime.invoke]) {
         try { await invoke(command, {}); results.push(false); } catch { results.push(true); }
       }
     }
     return results;
   });
-  assert.deepEqual(communityDenied, Array(6).fill(true));
+  assert.deepEqual(communityDenied, Array(16).fill(true));
   assert.equal(await frame.locator('#view-plugins').isVisible(), false);
   assert.equal(await frame.locator('#view-mcp').isVisible(), true);
   assert.deepEqual(await page.evaluate(() => fixture.calls.map(item => item.command)), ['get_hosted_snapshot']);

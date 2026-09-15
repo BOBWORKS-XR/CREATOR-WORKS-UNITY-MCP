@@ -21,6 +21,7 @@ const files = new Map([
   ['/community.js', ['community.js', 'text/javascript']],
   ['/community.css', ['community.css', 'text/css']],
   ['/icons/puzzle.svg', ['icons/puzzle.svg', 'image/svg+xml']],
+  ['/icons/folder-open.svg', ['icons/folder-open.svg', 'image/svg+xml']],
   ['/icons/refresh-cw.svg', ['icons/refresh-cw.svg', 'image/svg+xml']],
   ['/icons/download.svg', ['icons/download.svg', 'image/svg+xml']],
   ['/updates.js', ['updates.js', 'text/javascript']], ['/creator-works-logo.png', ['creator-works-logo.png', 'image/png']],
@@ -54,6 +55,11 @@ try {
         tool_groups: 'core', auto_start: true, enable_custom_scripts: false, allow_all_tests: true,
         automatic_update_checks: false } };
     state.community = {entries:[{...entry, previewImage:null}, {...entry, id:'fixture.download', name:'Download test fixture', author:{name:'Fixture author'}, category:'prefab', reviewStatus:'listed', previewImage:null}], warnings:[], stale:false};
+    state.pluginProjects = [
+      {id:'project-closed',name:'Closed disposable project',path:'C:\\UnityFixtures\\Closed disposable project',unityVersion:'6000.3.21f1',sdk:'Creator SDK',helper:'missing',open:false},
+      {id:'project-open',name:'Open project',path:'C:\\UnityFixtures\\Open project',unityVersion:'6000.3.21f1',sdk:'Unity',helper:'missing',open:true}
+    ];
+    state.importStatus = 'review';
     state.hold = name => new Promise(resolve => { state.gates[name] = resolve; });
     const profile = project => ({ profile: project?.includes('Banter') ? 'banter' : 'creator',
       label: state.long ? 'Creator SDK 4.0.14 experimental compatibility verification pending' :
@@ -70,6 +76,18 @@ try {
           case 'community_catalogue': return structuredClone(state.community);
           case 'open_community_link': return;
           case 'download_community_package': await state.hold('download'); return 'Saved fixture package; no Unity import.';
+          case 'community_projects':
+            if (state.delayProjects) await state.hold('projects');
+            return {projects:structuredClone(state.pluginProjects),warnings:[]};
+          case 'choose_community_project': return null;
+          case 'install_community_menu':
+            await state.hold('installMenu');
+            state.pluginProjects.find(p => p.id === args.projectId).helper = 'installed';
+            return 'Fixture menu added; no real project changed.';
+          case 'queue_community_import':
+            await state.hold('queueImport');
+            return {projectId:args.projectId,requestId:'fixture-request',status:'queued',message:'Nothing imported.'};
+          case 'community_import_status': return {...args,status:state.importStatus,message:'Fixture Unity result.'};
           case 'load_config': return structuredClone(state.config);
           case 'save_config': state.config = structuredClone(args.config); return;
           case 'discover_unity_projects': return state.config.channels.map(c => ({name:c.name,path:c.unity_project_path,unityVersion:'6000.3.21f1'}));
@@ -428,6 +446,60 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.community-item').length === 2 && !document.querySelector('[data-community-download]').disabled);
   assert.match(await page.locator('[data-id="egon-gb.start-location"]').innerText(), /Mr\. E \/ egon\.gb/);
   assert.equal(await page.locator('[data-id="egon-gb.start-location"] [data-community-download]').count(), 0);
+  const addUnityMenu = page.getByRole('button', {name:'Add Unity menu',exact:true,includeHidden:true});
+  assert.equal(await addUnityMenu.isVisible(), false);
+  assert.equal(await page.locator('[data-community-import]').count(), 0);
+  for (const disabledValue of [false, 'true', 1]) {
+    await page.evaluate(value => { fixture.community.projectImportEnabled = value; }, disabledValue);
+    await page.getByRole('button', {name:'Refresh catalogue',exact:true}).click();
+    await page.waitForFunction(() => !document.querySelector('[aria-label="Refresh catalogue"]').disabled);
+    assert.equal(await addUnityMenu.isVisible(), false);
+    assert.equal(await page.locator('[data-community-import]').count(), 0);
+    await addUnityMenu.evaluate(button => button.click());
+    assert.equal(await page.locator('.community-project-dialog').isVisible(), false);
+  }
+  assert.equal(await page.evaluate(() => fixture.calls.filter(c => ['community_projects','install_community_menu','queue_community_import'].includes(c.name)).length), 0);
+  for (const width of [900,560,390]) {
+    await page.setViewportSize({width,height:800});
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({path:path.join(output,`community-downloads-only-${width}.png`),fullPage:true});
+  }
+  checks.push('Downloads-only is fail-closed for absent/false/non-boolean import authority; hidden actions cannot open project picker or issue writes');
+  // Exercise the explicit capability independently from fail-closed older snapshots.
+  await page.evaluate(() => { fixture.community.projectImportEnabled = true; });
+  await page.evaluate(() => {
+    const base = fixture.community.entries[0];
+    fixture.community.entries.push(
+      {...base, id:'fixture.mcp-tool', name:'MCP tool fixture', category:'mcp-tool', reviewStatus:'listed', includesCode:true,
+        download:{url:'https://cdn.sidequestvr.com/file/1/tool.zip', sha256:'a'.repeat(64), byteLength:128}},
+      {...base, id:'fixture.ai-skill', name:'AI skill instructions fixture', category:'ai-skill', scope:'instructions-only', reviewStatus:'listed', download:null}
+    );
+  });
+  await page.getByRole('button', {name:'Refresh catalogue',exact:true}).click();
+  await page.waitForFunction(() => document.querySelectorAll('.community-item').length === 4);
+  for (const [category, id] of [['mcp-tool','fixture.mcp-tool'], ['ai-skill','fixture.ai-skill']]) {
+    await page.locator(`[data-category="${category}"]`).click();
+    assert.equal(await page.locator('.community-item').count(), 1);
+    assert.equal(await page.locator('.community-item').getAttribute('data-id'), id);
+    assert.equal(await page.locator('[data-community-import]').count(), 0);
+  }
+  assert.match(await page.locator('.community-review').innerText(), /Instructions only/);
+  assert.equal(await page.locator('[data-community-download]').count(), 0);
+  await page.locator('[data-category="mcp-tool"]').click();
+  assert.equal(await page.locator('[data-community-download]').isEnabled(), true);
+  assert.equal(await page.locator('.community-code').innerText(), 'Includes code');
+  assert.match(await page.locator('.community-caution').textContent(), /Review code before installing or running it/);
+  await page.locator('[data-category="all"]').click();
+  for (const width of [900,560,390]) {
+    await page.setViewportSize({width,height:800});
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({path:path.join(output,`community-categories-${width}.png`),fullPage:true});
+  }
+  assert.equal(await page.evaluate(() => fixture.calls.filter(c => ['download_community_package','queue_community_import'].includes(c.name)).length), 0);
+  await page.evaluate(() => { fixture.community.entries = fixture.community.entries.filter(entry => !['fixture.mcp-tool','fixture.ai-skill'].includes(entry.id)); });
+  await page.getByRole('button', {name:'Refresh catalogue',exact:true}).click();
+  await page.waitForFunction(() => document.querySelectorAll('.community-item').length === 2);
+  checks.push('MCP tools and AI skills filters, ZIP download-only, instructions-only labels, code caution, no import actions and 900/560/390px layouts');
   await page.locator('[data-category="graph"]').click();
   assert.equal(await page.locator('.community-item').count(), 1);
   for (const width of [900, 560, 390]) {
@@ -439,6 +511,75 @@ try {
   assert.equal(await page.locator('.community-item').count(), 0);
   await page.getByRole('button', {name:'Clear filters',exact:true}).click();
   assert.equal(await page.locator('.community-item').count(), 2);
+  assert.equal(await page.locator('[data-id="egon-gb.start-location"] [data-community-import]').isDisabled(), true);
+  await page.evaluate(() => { fixture.delayProjects = true; });
+  await page.getByRole('button', {name:'Add Unity menu',exact:true}).click();
+  const projectDialog = page.locator('.community-project-dialog');
+  assert.match(await projectDialog.innerText(), /Experimental project integration/);
+  const projectSelect = page.locator('#community-project-select');
+  const addMenu = projectDialog.getByRole('button',{name:'Add menu to project',exact:true});
+  await page.waitForFunction(() => typeof fixture.gates.projects === 'function');
+  assert.equal(await projectDialog.getAttribute('aria-busy'), 'true');
+  assert.equal(await projectDialog.getByText('Loading Unity projects... Please wait.',{exact:true}).isVisible(), true);
+  assert.equal(await projectSelect.isDisabled(), true);
+  assert.equal(await projectDialog.getByRole('button',{name:'Close',exact:true}).isDisabled(), true);
+  await page.screenshot({path:path.join(output,'community-project-loading.png')});
+  await page.evaluate(() => { fixture.delayProjects = false; fixture.gates.projects(); });
+  await page.waitForFunction(() => document.querySelector('#community-project-select option[value="project-open"]'));
+  assert.equal(await projectDialog.getAttribute('aria-busy'), 'false');
+  assert.equal(await projectDialog.getByText('Loading Unity projects... Please wait.',{exact:true}).isVisible(), false);
+  assert.equal(await addMenu.isDisabled(), true);
+  await projectSelect.selectOption('project-open');
+  assert.equal(await addMenu.isDisabled(), true);
+  assert.match(await projectDialog.innerText(), /Close this project in Unity/);
+  await projectDialog.getByRole('button',{name:'Browse',exact:true}).click();
+  assert.equal(await projectSelect.inputValue(),'project-open');
+  await projectSelect.selectOption('project-closed');
+  await addMenu.click();
+  await page.waitForFunction(() => typeof fixture.gates.installMenu === 'function');
+  await page.keyboard.press('Escape');
+  assert.equal(await projectDialog.isVisible(), true);
+  assert.equal(await projectDialog.getByRole('button',{name:'Close',exact:true}).isDisabled(), true);
+  assert.equal(await page.locator('#workspaceControls').evaluate(el => el.disabled), true);
+  assert.match(await page.evaluate(() => CreatorCommunityInvoke('queue_community_import',{id:'fixture.download',projectId:'project-closed'}).catch(String)), /Another MCP operation/);
+  await page.evaluate(() => fixture.gates.installMenu());
+  await page.waitForFunction(() => document.querySelector('.community-project-dialog .community-project-safety').textContent.includes('menu installed'));
+  assert.equal(await addMenu.isVisible(), false);
+  await page.keyboard.press('Escape');
+  assert.equal(await projectDialog.isVisible(), false);
+  await page.locator('[data-id="fixture.download"] [data-community-import]').click();
+  await projectSelect.selectOption('project-closed');
+  const sendImport = projectDialog.getByRole('button',{name:'Send to Unity for review',exact:true});
+  await page.evaluate(() => {
+    document.querySelector('.community-project-path').textContent = 'C:\\UnityFixtures\\' + 'VeryLongProjectFolderName'.repeat(12);
+  });
+  for (const width of [900,560,390]) {
+    await page.setViewportSize({width,height:700});
+    const bounds = await projectDialog.evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return {left:r.left,right:r.right,bottom:r.bottom,top:r.top,scroll:el.scrollWidth,width:el.clientWidth};
+    });
+    assert.ok(bounds.left >= 0 && bounds.right <= width && bounds.top >= 0 && bounds.bottom <= 700 && bounds.scroll <= bounds.width);
+    await page.screenshot({path:path.join(output,`community-project-${width}.png`)});
+  }
+  await sendImport.click();
+  await page.waitForFunction(() => typeof fixture.gates.queueImport === 'function');
+  await page.keyboard.press('Escape');
+  assert.equal(await projectDialog.isVisible(), true);
+  assert.equal(await page.locator('#workspaceControls').evaluate(el => el.disabled), true);
+  await page.evaluate(() => fixture.gates.queueImport());
+  await page.waitForFunction(() => [...document.querySelectorAll('.community-project-dialog .community-message')].some(node => !node.hidden && node.textContent.includes('Queued, not imported')));
+  assert.equal(await sendImport.isDisabled(), true);
+  const checkImport = projectDialog.getByRole('button',{name:'Check Unity status',exact:true});
+  await checkImport.click();
+  assert.match(await projectDialog.innerText(), /Waiting for the Unity import outcome/);
+  await page.evaluate(() => { fixture.importStatus = 'cancelled'; });
+  await checkImport.click();
+  assert.match(await projectDialog.innerText(), /Cancelled/);
+  await projectDialog.getByRole('button',{name:'Close',exact:true}).click();
+  assert.deepEqual(await page.evaluate(() => fixture.calls.filter(c=>c.name==='install_community_menu').map(c=>c.args)),[{projectId:'project-closed'}]);
+  assert.deepEqual(await page.evaluate(() => fixture.calls.filter(c=>c.name==='queue_community_import').map(c=>c.args)),[{id:'fixture.download',projectId:'project-closed'}]);
+  checks.push('Project picker and install/queue/status modal: pending/open-project blocking, ID-only requests, native workflow exclusion, busy Escape lock, cancelled picker, queued-versus-imported wording and 900/560/390px long-path layouts');
   await page.locator('[data-id="fixture.download"] [data-community-download]').click();
   await page.waitForFunction(() => typeof fixture.gates.download === 'function');
   await toggle.click();
@@ -452,7 +593,7 @@ try {
   await page.waitForFunction(() => !document.getElementById('workspaceControls').disabled);
   await toggle.click();
   await page.locator('[data-local-view="plugins"]').click();
-  assert.match(await page.locator('.community-message').innerText(), /Saved fixture/);
+  assert.match(await page.locator('#view-plugins > .community-message').innerText(), /Saved fixture/);
   assert.equal(await page.locator('[data-community-download]').isEnabled(), true);
   await page.evaluate(() => { fixture.community.stale = true; });
   await page.getByRole('button', {name:'Refresh catalogue',exact:true}).click();

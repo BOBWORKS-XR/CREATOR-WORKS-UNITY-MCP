@@ -1,6 +1,6 @@
 [package]
 name = "creator-works-mcp-launcher"
-version = "2.7.0-alpha.1"
+version = "2.7.0-alpha.2"
 description = "Creator Works MCP Configuration Launcher"
 authors = ["Creator Works"]
 license = "MIT"
@@ -24,9 +24,16 @@ uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "native-tls"] }
 semver = "1"
 tempfile = "3"
+fs2 = "0.4"
+getrandom = "0.3"
+flate2 = "=1.1.10"
+tar = "=0.4.46"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [features]
 default = ["custom-protocol"]

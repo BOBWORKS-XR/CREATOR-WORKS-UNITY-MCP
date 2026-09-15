@@ -9,12 +9,24 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::Manager;
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+#[path = "community_package.rs"]
+mod package;
 
 pub const ROOT: &str = "https://raw.githubusercontent.com/SideQuestVR/Creator-Community/main/";
 const REPO: &str = "https://github.com/SideQuestVR/Creator-Community";
 const MAX_LISTING: u64 = 16 * 1024;
 const MAX_DOWNLOAD: u64 = 32 * 1024 * 1024;
+const PROJECT_IMPORT_ENABLED: bool = true;
+
+pub fn require_import_preview() -> Result<(), String> {
+    if PROJECT_IMPORT_ENABLED {
+        Ok(())
+    } else {
+        Err("Unity menu installation and project imports are not enabled in this prerelease. Download the package and review its instructions instead.".into())
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -88,11 +100,23 @@ struct Index {
     schema_version: u32,
     entries: Vec<String>,
 }
-#[derive(Clone, Default, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Snapshot {
     entries: Vec<Listing>,
     warnings: Vec<String>,
     stale: bool,
+    #[serde(rename = "projectImportEnabled")]
+    project_import_enabled: bool,
+}
+impl Default for Snapshot {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            warnings: Vec::new(),
+            stale: false,
+            project_import_enabled: PROJECT_IMPORT_ENABLED,
+        }
+    }
 }
 #[derive(Default)]
 pub struct Community(Mutex<Option<(Instant, Snapshot)>>);
@@ -166,8 +190,16 @@ impl Listing {
             || !text_ok(&self.author.name, 120)
             || !text_ok(&self.license, 120)
             || !text_ok(&self.test_notes, 4000)
-            || !["prefab", "graph", "recipe", "plugin", "community-tool"]
-                .contains(&self.category.as_str())
+            || ![
+                "prefab",
+                "graph",
+                "recipe",
+                "plugin",
+                "community-tool",
+                "mcp-tool",
+                "ai-skill",
+            ]
+            .contains(&self.category.as_str())
             || !["editor-only", "runtime", "both", "instructions-only"]
                 .contains(&self.scope.as_str())
             || !["pending", "listed"].contains(&self.review_status.as_str())
@@ -464,9 +496,105 @@ pub fn download_worker(handle: tauri::AppHandle, id: String) -> Result<String, S
     ))
 }
 
+fn importable(entry: &Listing) -> Result<&Download, String> {
+    if !matches!(
+        entry.category.as_str(),
+        "graph" | "prefab" | "plugin" | "community-tool"
+    ) {
+        return Err(
+            "This contribution uses its own installation instructions, not Unity asset import."
+                .into(),
+        );
+    }
+    if !matches!(entry.scope.as_str(), "editor-only" | "runtime" | "both") {
+        return Err("Instructions-only contributions cannot be imported into Unity.".into());
+    }
+    if entry.review_status != "listed" {
+        return Err("This contribution is awaiting review. Project import is not enabled.".into());
+    }
+    let download = entry
+        .download
+        .as_ref()
+        .ok_or("This entry has no package download.")?;
+    if !Url::parse(&download_url(download)?).is_ok_and(|u| u.path().ends_with(".unitypackage")) {
+        return Err("Only .unitypackage files can be sent to Unity. Download ZIP files separately and review their instructions.".into());
+    }
+    Ok(download)
+}
+pub fn queue_import_worker(
+    handle: tauri::AppHandle,
+    id: String,
+    project_id: String,
+) -> Result<crate::community_project::Outcome, String> {
+    require_import_preview()?;
+    let entry = selected(&handle, &id, true)?;
+    let download = importable(&entry)?;
+    let target = crate::community_project::selected(&handle, &project_id)?;
+    if target.helper != "installed" {
+        return Err("Add the matching Unity menu before sending packages to this project.".into());
+    }
+    let bytes = fetch(&client()?, &download_url(download)?, download.byte_length)?;
+    verify_download(&bytes, download)?;
+    let review = package::inspect(&bytes)?;
+    let approved = handle.dialog().message(format!("Send {} {} to {} for review?\n\n{}\nUnity {} / {}\n\n{}\n\nThe verified package will be queued outside Assets. In Unity, use Creator Plugins > Browse to review file selection and decide whether to import. Code may execute on import. No scene will be saved automatically.", entry.name, entry.version, target.name, target.path, target.unity_version, target.sdk, review.summary(std::path::Path::new(&target.path)))).title("Review package contents").kind(MessageDialogKind::Warning).buttons(MessageDialogButtons::OkCancelCustom("Send for review".into(), "Cancel".into())).blocking_show();
+    if !approved {
+        return Ok(crate::community_project::Outcome {
+            project_id,
+            request_id: String::new(),
+            status: "cancelled".into(),
+            message: "Cancelled. No package was queued or imported.".into(),
+        });
+    }
+    let current = selected(&handle, &id, true)?;
+    let current_download = importable(&current)?;
+    if current.version != entry.version
+        || current_download.sha256 != download.sha256
+        || download_url(current_download)? != download_url(download)?
+    {
+        return Err("The listing changed. Refresh and review it again before sending.".into());
+    }
+    crate::community_project::queue(
+        &target,
+        &entry.id,
+        &entry.version,
+        &entry.name,
+        &download.sha256,
+        &bytes,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn experimental_import_capability_matches_native_gate() {
+        assert!(require_import_preview().is_ok());
+        assert_eq!(
+            serde_json::to_value(Snapshot::default()).unwrap()["projectImportEnabled"],
+            true
+        );
+    }
+    #[test]
+    fn only_reviewed_unitypackages_can_be_queued() {
+        let mut entry: Listing = serde_json::from_str(include_str!(
+            "../../tests/fixtures/community/start-location.json"
+        ))
+        .unwrap();
+        assert!(importable(&entry).is_err());
+        entry.review_status = "listed".into();
+        assert!(importable(&entry).is_ok());
+        for category in ["mcp-tool", "ai-skill", "recipe"] {
+            entry.category = category.into();
+            assert!(importable(&entry).is_err());
+        }
+        entry.category = "graph".into();
+        entry.scope = "instructions-only".into();
+        assert!(importable(&entry).is_err());
+        entry.scope = "both".into();
+        entry.download.as_mut().unwrap().url =
+            Some("https://cdn.sidequestvr.com/file/1/test.zip".into());
+        assert!(importable(&entry).is_err());
+    }
     #[test]
     fn saving_checks_integrity_and_never_replaces_an_existing_file() {
         let temp = tempfile::tempdir().unwrap();
@@ -560,6 +688,28 @@ mod tests {
         bad = entry;
         bad.download.as_mut().unwrap().sha256 = "x".repeat(64);
         assert!(bad.validate().is_err());
+    }
+    #[test]
+    fn catalogue_categories_accept_ai_contributions_without_enabling_unity_import() {
+        let mut entry: Listing = serde_json::from_str(include_str!(
+            "../../tests/fixtures/community/start-location.json"
+        ))
+        .unwrap();
+        entry.review_status = "listed".into();
+        for category in ["mcp-tool", "ai-skill"] {
+            entry.category = category.into();
+            entry.download.as_mut().unwrap().url =
+                Some("https://cdn.sidequestvr.com/file/1/tool.zip".into());
+            entry.validate().unwrap();
+            assert!(importable(&entry).is_err());
+            let download = entry.download.take();
+            entry.scope = "instructions-only".into();
+            entry.validate().unwrap();
+            assert!(importable(&entry).is_err());
+            entry.download = download;
+        }
+        entry.category = "unknown-tool".into();
+        assert!(entry.validate().is_err());
     }
     #[test]
     fn checksum_and_length_are_both_required() {

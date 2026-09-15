@@ -1,12 +1,13 @@
 (() => {
-  const allowed = new Set(['community_catalogue', 'open_community_link', 'download_community_package']);
+  const guarded = new Set(['download_community_package', 'choose_community_project', 'install_community_menu', 'queue_community_import']);
+  const allowed = new Set([...guarded, 'community_catalogue', 'open_community_link', 'community_projects', 'community_import_status']);
   window.CreatorCommunityInvoke = async (command, args = {}) => {
     await window.CreatorRuntime.ready;
     if (window.CreatorRuntime.hosted || !allowed.has(command)) {
       throw new Error('Use Creator Plugins in Hub for community actions.');
     }
     const invoke = () => window.CreatorRuntime.invoke(command, args);
-    if (command === 'download_community_package') {
+    if (guarded.has(command)) {
       if (!window.CreatorMcpOperations) throw new Error('MCP is still opening. Try again shortly.');
       return window.CreatorMcpOperations.run(invoke);
     }

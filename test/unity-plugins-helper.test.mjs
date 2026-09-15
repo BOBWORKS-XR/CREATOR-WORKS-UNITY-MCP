@@ -44,3 +44,41 @@ test('queued review uses external content-addressed files and bounded transport'
   assert.match(source, /active-review\.json/);
   assert.match(source, /Previous import review restored\. Its outcome is not confirmed; nothing was retried\./);
 });
+
+test('Unity started callback does not claim the user approved or imported files', () => {
+  const started = source.slice(source.indexOf('private static void Started('), source.indexOf('private static void Finished('));
+  assert.match(started, /before approval/);
+  assert.doesNotMatch(started, /WriteReceipt|SaveNew|File\./);
+  assert.doesNotMatch(source, /File\.Replace|WriteReceipt/);
+  const complete = source.slice(source.indexOf('private static void Complete('), source.indexOf('private static void ReleaseLock('));
+  assert.match(complete, /PluginProtocol\.SaveNew\(Project, "receipts\//);
+  assert.ok(complete.indexOf('RequireSameRequest') < complete.indexOf('PluginProtocol.SaveNew'));
+  assert.ok(complete.indexOf('PluginProtocol.SaveNew') < complete.indexOf('File.Delete'));
+});
+
+test('omitted Unity catalogue review state remains pending rather than download-enabled', () => {
+  assert.match(source, /if \(entry.reviewStatus == null\) entry.reviewStatus = "pending"/);
+  assert.match(source, /entry.reviewStatus != "listed"/);
+});
+
+test('Unity catalogue checks its type-aware import route before fetching or queueing bytes', () => {
+  const download = source.slice(source.indexOf('private void Download(Listing entry)'), source.indexOf('private void Link('));
+  assert.ok(download.indexOf('PluginProtocol.CanImport(entry)') < download.indexOf('Fetch('));
+  assert.match(source, /!PluginProtocol\.CanImport\(selected\)/);
+});
+
+test('asset organization is a separate reviewed selection, never an import callback or save', () => {
+  assert.match(source, /MenuItem\("Creator Plugins\/Organize selected assets\.\.\."\)/);
+  assert.match(source, /AssetOrganizer\.Plan\(Selection\.objects\)/);
+  const organizer = source.slice(source.indexOf('internal static class AssetOrganizer'), source.indexOf('[InitializeOnLoad]'));
+  assert.match(organizer, /AssetDatabase\.MoveAsset/);
+  assert.match(organizer, /AssetDatabase\.ValidateMoveAsset/);
+  assert.match(organizer, /AssetDatabase\.IsSubAsset/);
+  assert.match(organizer, /EditorUtility\.IsDirty/);
+  assert.match(organizer, /guid != plan\[i\]\.guid/);
+  assert.doesNotMatch(organizer, /GetDependencies|SaveAssets|SaveScene|SaveAssetIfDirty|ImportPackage|SaveNew/);
+  const apply = organizer.slice(organizer.indexOf('internal static int Apply'));
+  assert.ok(apply.indexOf('var current = Plan(') < apply.indexOf('AssetDatabase.CreateFolder'));
+  const callbacks = source.slice(source.indexOf('internal static class ImportReview'), source.indexOf('public sealed class CreatorPluginsWindow'));
+  assert.doesNotMatch(callbacks, /AssetOrganizer|OrganizeAssetsWindow/);
+});

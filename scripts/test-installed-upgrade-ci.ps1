@@ -10,7 +10,7 @@ $candidate = (Resolve-Path -LiteralPath $Installer).Path
 $candidateRoot = [IO.Path]::GetFullPath((Join-Path $repo 'launcher\src-tauri\target\release\bundle\nsis')) + '\'
 if (-not $candidate.StartsWith($candidateRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Candidate must be built in this checkout.' }
 $version = (Get-Content -LiteralPath (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json).version
-if ($version -ne '2.7.0-alpha.1') { throw 'Review this version-specific acceptance fixture before using another release.' }
+if ($version -ne '2.7.0-alpha.2') { throw 'Review this version-specific acceptance fixture before using another release.' }
 $installRoot = Join-Path $env:LOCALAPPDATA 'Creator Works MCP'
 $configRoot = Join-Path $env:APPDATA 'creator-works-mcp'
 $productKey = 'HKCU:\Software\Creator Works\Creator Works MCP'

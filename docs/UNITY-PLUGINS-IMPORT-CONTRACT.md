@@ -1,8 +1,12 @@
 # Optional Unity Creator Plugins Helper
 
 Development source only. No real project or installed app is modified by adding
-this folder to the MCP repository. The shared desktop installer/queue actions are
-owned by the Creator Works Helper task and are not implemented here.
+this folder to the MCP repository. Shared desktop project selection, helper
+installation and queue/status actions are integrated in the development branch.
+The alpha.2 candidate enables these actions as experimental, with explicit
+project consent and Unity import review. Hosted MCP transport does not expose
+these commands. See [current validation](UNITY-PLUGINS-ALPHA2-VALIDATION.md)
+for tested behavior and remaining acceptance limits.
 
 ## Installation
 
@@ -39,14 +43,17 @@ project's `.creator-plugins` directory or use existing symbolic links/junctions.
 Metadata polling happens only while the window is open, at most once per five
 seconds when the Editor is not compiling, updating or entering/running Play mode.
 It reads at most 100 requests (16 KiB per JSON document). It does not hash package
-files or traverse scenes during polling. The helper writes a `queued` receipt
-after accepting request metadata; that is not package-integrity or import proof.
+files or traverse scenes during polling. Polling never writes receipts. A valid
+inbox request without active tracking or a final receipt is `queued`; that is not
+package-integrity or import proof.
 
-Each receipt contains `schemaVersion`, `requestId`, `status`, and `message`:
+Status responses contain `schemaVersion`, `requestId`, `status`, and `message`.
+Only terminal outcomes are persisted as receipts, exactly once:
 
 - `queued`: request metadata accepted; waiting for the user.
-- `review`: the user requested Unity's interactive review, or Unity reported the
-  import started. No completion is inferred from `ImportPackage` returning.
+- `review`: derived from a validated `active-review.json` with the full matching
+  request identity. No completion is inferred from `ImportPackage` returning or
+  its started callback.
 - `imported`: a matching Unity completion callback arrived. This says nothing
   about compilation, correct references, gameplay, frame rate or headset behavior.
 - `cancelled`: a matching Unity cancellation callback arrived.
@@ -62,8 +69,17 @@ assets can be replaced only through the user's interactive import decision.
 An `active-review.json` journal preserves a pending review across domain reload
 or restart. An unresolved review is not replayed. The helper correlates callback
 names to the checksum-based package basename and ignores unrelated callbacks.
-Actual interactive callback naming/completion still needs native UI acceptance
-on supported Unity versions; simulated callbacks do not establish that behavior.
+The final receipt is published with a no-overwrite save before active tracking
+is removed. A durable terminal receipt wins over leftover active tracking. The
+helper never replaces an existing receipt. Older development `queued`/`review`
+receipt files, malformed state and changed identities fail closed and are
+preserved, not migrated or retried automatically.
+
+The 2026-09-14 interactive test caught a Windows receipt-replacement failure;
+the write-once correction removes that replacement operation. Subsequent real
+cancel/text/C#-reload tests passed on Unity 2022.3 and Unity 6; their exact helper
+identity and the later candidate changes are recorded in the validation report.
+Simulated callbacks alone are not native import acceptance.
 
 ## Catalogue
 
@@ -95,7 +111,7 @@ No bridge routes or existing Unity project files were changed for this helper.
 
 `scripts/check-unity-plugins.ps1` compiles against installed Unity 2022.3.39f1 and
 6000.3.21f1 assemblies with warnings as errors (only expected JSON field CS0649
-is suppressed), then runs 35 pure file/identity checks for each version.
+is suppressed), then runs pure file/identity checks for each version.
 
 `scripts/smoke-unity-plugins-editor.ps1` creates a new disposable project, loads
 the real embedded package, and runs native JsonUtility/queue checks. A second

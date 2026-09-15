@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $root 'launcher\unity\com.creatorworks.plugins\Editor\CreatorPluginsWindow.cs'
 $tests = Join-Path $root 'launcher\tests\unity\CreatorPluginsProtocolTests.cs'
+$interactiveTests = Join-Path $root 'launcher\tests\unity\CreatorPluginsInteractiveSmoke.cs'
 $output = Join-Path $root 'artifacts\unity-plugins-compile'
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 foreach ($version in $UnityVersions) {
@@ -24,7 +25,7 @@ foreach ($version in $UnityVersions) {
     ) | Sort-Object FullName -Unique
     $arguments = @('/nologo', '/nostdlib+', '/langversion:8.0', '/warnaserror+', '/nowarn:0649', '/target:exe', "/out:`"$target`"", "/main:CreatorPluginsProtocolTests")
     $arguments += $references | ForEach-Object { "/reference:`"$($_.FullName)`"" }
-    $arguments += @("`"$source`"", "`"$tests`"")
+    $arguments += @("`"$source`"", "`"$tests`"", "`"$interactiveTests`"")
     $response = Join-Path $output "$version.rsp"
     [IO.File]::WriteAllLines($response, $arguments)
     & $mono $compiler /noconfig "@$response"

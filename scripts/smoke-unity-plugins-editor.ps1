@@ -19,6 +19,9 @@ New-Item -ItemType Directory -Path $scripts, $packages, $settings -Force | Out-N
 Copy-Item -LiteralPath (Join-Path $root 'launcher\unity\com.creatorworks.plugins') -Destination $packages -Recurse
 Copy-Item -LiteralPath (Join-Path $root 'launcher\tests\unity\CreatorPluginsEditorSmoke.cs'), (Join-Path $root 'launcher\tests\unity\CreatorWorks.Plugins.Editor.Tests.asmdef') -Destination $scripts
 Copy-Item -LiteralPath (Join-Path $root 'launcher\tests\fixtures\community\start-location.json') -Destination (Join-Path $fixture 'pending-listing.json')
+$implicit = Get-Content -LiteralPath (Join-Path $fixture 'pending-listing.json') -Raw | ConvertFrom-Json
+$implicit.PSObject.Properties.Remove('reviewStatus')
+[IO.File]::WriteAllText((Join-Path $fixture 'implicit-pending-listing.json'), ($implicit | ConvertTo-Json -Depth 20))
 $log = Join-Path $fixture 'Editor.log'
 $process = Start-Process -FilePath $editor -ArgumentList @('-batchmode', '-nographics', '-projectPath', "`"$fixture`"", '-executeMethod', 'CreatorPluginsEditorSmoke.Run', '-logFile', "`"$log`"") -PassThru -WindowStyle Hidden
 Write-Output "Disposable Unity fixture: $fixture (PID $($process.Id))"

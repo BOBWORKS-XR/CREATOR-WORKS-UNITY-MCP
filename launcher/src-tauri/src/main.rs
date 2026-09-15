@@ -3,6 +3,7 @@
 
 mod community;
 mod community_api;
+mod community_project;
 mod feedback;
 #[cfg(windows)]
 mod gui_owner;
@@ -582,8 +583,42 @@ fn upgrade_loaded_config(
     Ok(changed)
 }
 
-/// Write a text file by publishing a complete temporary file in the same directory.
-/// This prevents launcher/config readers from observing truncated JSON or TOML.
+// Keep the previous file until ReplaceFileW has published the replacement.
+#[cfg(windows)]
+fn publication_backup(destination: &Path) -> std::io::Result<PathBuf> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| std::io::Error::other("Missing publication directory"))?;
+    // Retained recovery files are never automatically removed on a later operation.
+    let mut retained = 0;
+    for entry in fs::read_dir(parent)? {
+        if entry?
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".cw-publish-")
+        {
+            retained += 1;
+            if retained >= 8 {
+                return Err(std::io::Error::other("Previous file-publication recovery folders need inspection before another write. Existing files were preserved."));
+            }
+        }
+    }
+    Ok(tempfile::Builder::new()
+        .prefix(".cw-publish-")
+        .tempdir_in(parent)?
+        .keep())
+}
+
+#[cfg(windows)]
+fn finish_publication_backup(directory: &Path, committed: bool) -> std::io::Result<()> {
+    if committed {
+        fs::remove_file(directory.join("previous"))?;
+    }
+    // On failure, remove only an empty folder. A recovery file must survive.
+    fs::remove_dir(directory)
+}
+
+/// Publish a complete temporary file without exposing truncated JSON or TOML.
 fn publish_temporary_file(temporary_path: &Path, destination: &Path) -> std::io::Result<()> {
     if !destination.exists() {
         return fs::rename(temporary_path, destination);
@@ -592,7 +627,15 @@ fn publish_temporary_file(temporary_path: &Path, destination: &Path) -> std::io:
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_WRITE_THROUGH};
+        use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+
+        let backup_directory = publication_backup(destination)?;
+        let backup = backup_directory.join("previous");
+        let backup_wide: Vec<u16> = backup
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
 
         let destination_wide: Vec<u16> = destination
             .as_os_str()
@@ -610,19 +653,31 @@ fn publish_temporary_file(temporary_path: &Path, destination: &Path) -> std::io:
             ReplaceFileW(
                 destination_wide.as_ptr(),
                 temporary_wide.as_ptr(),
-                std::ptr::null(),
-                REPLACEFILE_WRITE_THROUGH,
+                backup_wide.as_ptr(),
+                0,
                 std::ptr::null(),
                 std::ptr::null(),
             )
         };
         if replaced != 0 {
+            if let Err(error) = finish_publication_backup(&backup_directory, true) {
+                eprintln!(
+                    "File saved; previous-file cleanup deferred at {} ({error}).",
+                    backup_directory.display()
+                );
+            }
             return Ok(());
         }
 
         let replace_error = std::io::Error::last_os_error();
-        if !destination.exists() {
-            return fs::rename(temporary_path, destination);
+        if finish_publication_backup(&backup_directory, false).is_err() {
+            return Err(std::io::Error::new(
+                replace_error.kind(),
+                format!(
+                    "{replace_error}; recovery files preserved at {}. No write was retried.",
+                    backup_directory.display()
+                ),
+            ));
         }
         Err(replace_error)
     }
@@ -2112,6 +2167,7 @@ fn main() {
 
     tauri::Builder::default()
         .manage(community::Community::default())
+        .manage(community_project::ProjectImports::default())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -2138,6 +2194,11 @@ fn main() {
                 community_api::community_catalogue,
                 community_api::open_community_link,
                 community_api::download_community_package,
+                community_api::community_projects,
+                community_api::choose_community_project,
+                community_api::install_community_menu,
+                community_api::queue_community_import,
+                community_api::community_import_status,
                 begin_ui_operation,
                 finish_ui_operation,
                 load_config,
@@ -2351,6 +2412,97 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "new");
         assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn publication_preserves_open_readers_and_cleans_its_backup() {
+        use std::io::Read;
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ};
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("receipt.json");
+        let temporary = root.path().join("new.json");
+        fs::write(&target, "old complete receipt").unwrap();
+        fs::write(&temporary, "new complete receipt").unwrap();
+        let mut reader = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE)
+            .open(&target)
+            .unwrap();
+        publish_temporary_file(&temporary, &target).unwrap();
+        let mut previous = String::new();
+        reader.read_to_string(&mut previous).unwrap();
+        assert_eq!(previous, "old complete receipt");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new complete receipt");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn publication_failure_preserves_original_and_does_not_retry() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("receipt.json");
+        let temporary = root.path().join("new.json");
+        fs::write(&target, "old").unwrap();
+        fs::write(&temporary, "new").unwrap();
+        let blocker = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&target)
+            .unwrap();
+        assert!(publish_temporary_file(&temporary, &target).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "old");
+        assert_eq!(fs::read_to_string(&temporary).unwrap(), "new");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+        drop(blocker);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_publication_keeps_recovery_and_cleanup_failure_keeps_committed_data() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("receipt.json");
+        fs::write(&target, "committed").unwrap();
+        let backup = publication_backup(&target).unwrap();
+        fs::write(backup.join("previous"), "prior").unwrap();
+        assert!(finish_publication_backup(&backup, false).is_err());
+        assert_eq!(
+            fs::read_to_string(backup.join("previous")).unwrap(),
+            "prior"
+        );
+        let blocker = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(backup.join("previous"))
+            .unwrap();
+        assert!(finish_publication_backup(&backup, true).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "committed");
+        drop(blocker);
+        finish_publication_backup(&backup, true).unwrap();
+        assert!(!backup.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn publication_recovery_limit_refuses_new_writes_without_deleting_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("receipt.json");
+        let temporary = root.path().join("new.json");
+        fs::write(&target, "old").unwrap();
+        fs::write(&temporary, "new").unwrap();
+        for _ in 0..8 {
+            let backup = publication_backup(&target).unwrap();
+            fs::write(backup.join("previous"), "recovery").unwrap();
+        }
+        assert!(publish_temporary_file(&temporary, &target).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "old");
+        assert_eq!(fs::read_to_string(&temporary).unwrap(), "new");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 10);
     }
 
     #[test]

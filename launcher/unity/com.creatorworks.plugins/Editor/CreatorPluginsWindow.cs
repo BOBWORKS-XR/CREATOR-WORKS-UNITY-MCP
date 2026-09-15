@@ -75,7 +75,9 @@ namespace CreatorWorks.Plugins
         internal static void ValidateListing(Listing entry)
         {
             if (entry == null || entry.schemaVersion != 1 || !Id(entry.id) || !Version(entry.version) || !Text(entry.name, 120) || !Text(entry.description, 2000) || entry.author == null || !Text(entry.author.name, 120) || !Text(entry.license, 120) || !Text(entry.testNotes, 4000)) throw new InvalidDataException("Invalid listing identity.");
-            if (!new[] { "graph", "prefab", "recipe", "plugin", "community-tool" }.Contains(entry.category) || !new[] { "pending", "listed" }.Contains(entry.reviewStatus) || !new[] { "editor-only", "runtime", "both", "instructions-only" }.Contains(entry.scope)) throw new InvalidDataException("Invalid listing category or review state.");
+            // JsonUtility leaves omitted fields null; omission must never grant listed status.
+            if (entry.reviewStatus == null) entry.reviewStatus = "pending";
+            if (!new[] { "graph", "prefab", "recipe", "plugin", "community-tool", "mcp-tool", "ai-skill" }.Contains(entry.category) || !new[] { "pending", "listed" }.Contains(entry.reviewStatus) || !new[] { "editor-only", "runtime", "both", "instructions-only" }.Contains(entry.scope)) throw new InvalidDataException("Invalid listing category or review state.");
             if (!RepositoryPath(entry.licensePath) || !RepositoryPath(entry.instructionsPath)) throw new InvalidDataException("Invalid listing instructions path.");
             foreach (string url in new[] { entry.sourceUrl, entry.discussionUrl, entry.author.url }) if (!string.IsNullOrEmpty(url) && !WebUrl(url)) throw new InvalidDataException("Unapproved listing link.");
             if (!string.IsNullOrEmpty(entry.previewImage) && !RepositoryPath(entry.previewImage) && !WebUrl(entry.previewImage, true)) throw new InvalidDataException("Unapproved preview.");
@@ -83,6 +85,14 @@ namespace CreatorWorks.Plugins
             if (entry.usage != null && entry.usage.Length > 4000) throw new InvalidDataException("Instructions are too long.");
             if (entry.author.discord != null && !Text(entry.author.discord, 120)) throw new InvalidDataException("Invalid contributor name.");
             if (entry.download != null) DownloadUrl(entry.download);
+        }
+        internal static bool CanImport(Listing entry)
+        {
+            if (entry == null || entry.reviewStatus != "listed" ||
+                !new[] { "graph", "prefab", "plugin", "community-tool" }.Contains(entry.category) ||
+                !new[] { "editor-only", "runtime", "both" }.Contains(entry.scope)) return false;
+            try { return new Uri(DownloadUrl(entry.download)).AbsolutePath.EndsWith(".unitypackage", StringComparison.Ordinal); }
+            catch (InvalidDataException) { return false; }
         }
         private static bool Strings(string[] values, int count, int length) => values == null || values.Length <= count && values.All(v => Text(v, length));
         internal static string Canonical(string path) => Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -171,6 +181,172 @@ namespace CreatorWorks.Plugins
         }
     }
 
+    internal static class OrganizationPolicy
+    {
+        internal sealed class Asset
+        {
+            internal string path, guid, kind;
+        }
+        internal sealed class Move
+        {
+            internal string source, destination, guid;
+        }
+        internal static readonly string[] GraphFolders = { "Assets/Visual Scripting", "Assets/Visual Scripts", "Assets/VisualScripts", "Assets/VisualScripting", "Assets/VS" };
+        internal static bool AssetPath(string path) => path != null && path.StartsWith("Assets/", StringComparison.Ordinal) &&
+            path.Split('/').All(part => part.Length > 0 && part != "." && part != ".." && !part.Any(c => char.IsControl(c) || "\\:*?\"<>|".Contains(c)));
+
+        internal static Move[] Plan(Asset[] assets, Func<string, bool> folderExists, Func<string, bool> occupied)
+        {
+            if (assets == null || assets.Length == 0 || assets.Length > 64) throw new InvalidDataException("Select 1 to 64 graph assets or prefabs in the Project window.");
+            if (assets.Any(a => a == null || !AssetPath(a.path) || !PluginProtocol.Hex(a.guid, 32) || (a.kind != "graph" && a.kind != "prefab")))
+                throw new InvalidDataException("Only standalone Visual Scripting graphs or prefabs inside Assets can be organized.");
+            if (assets.Select(a => a.kind).Distinct().Count() != 1) throw new InvalidDataException("Select graphs or prefabs separately, not both together.");
+            if (assets.Select(a => a.path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != assets.Length || assets.Select(a => a.guid).Distinct().Count() != assets.Length)
+                throw new InvalidDataException("The selection contains duplicate assets.");
+            string folder = assets[0].kind == "prefab" ? "Assets/Prefabs" : GraphFolders.FirstOrDefault(folderExists) ?? GraphFolders[0];
+            if (!folderExists(folder) && occupied(folder)) throw new InvalidDataException("The destination folder name is already in use: " + folder);
+            var moves = assets.Select(a => new Move { source = a.path, destination = folder + "/" + Path.GetFileName(a.path), guid = a.guid })
+                .Where(m => !string.Equals(m.source, m.destination, StringComparison.Ordinal)).ToArray();
+            if (moves.Length == 0) throw new InvalidDataException("The selected assets are already in their destination folder.");
+            if (moves.Select(m => m.destination).Distinct(StringComparer.OrdinalIgnoreCase).Count() != moves.Length)
+                throw new InvalidDataException("Two selected assets have the same file name. Rename one in Unity first.");
+            foreach (var move in moves) if (occupied(move.destination)) throw new InvalidDataException("Nothing moved. Destination already exists: " + move.destination);
+            return moves;
+        }
+    }
+
+    // Explicit Project selection is the move scope, never a package's dependency closure.
+    internal static class AssetOrganizer
+    {
+        internal static void RequireIdle()
+        {
+            if (ImportReview.Busy) throw new InvalidOperationException("Wait for Unity to finish importing or compiling, and leave Play mode first.");
+        }
+        private static bool Occupied(string path) => File.Exists(path) || Directory.Exists(path) || File.Exists(path + ".meta") || !string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID(path));
+        private static void RequireUnlinked(string path)
+        {
+            if (!OrganizationPolicy.AssetPath(path)) throw new InvalidDataException("Asset path is outside Assets.");
+            string root = ImportReview.Project;
+            for (string item = Path.GetFullPath(Path.Combine(root, path)); item != root; item = Path.GetDirectoryName(item))
+            {
+                if (string.IsNullOrEmpty(item)) throw new InvalidDataException("Invalid asset path.");
+                try
+                {
+                    if ((File.GetAttributes(item) & FileAttributes.ReparsePoint) != 0)
+                        throw new InvalidDataException("Linked asset paths cannot be organized: " + path);
+                }
+                catch (FileNotFoundException) { }
+                catch (DirectoryNotFoundException) { }
+            }
+        }
+        private static OrganizationPolicy.Asset ReadAsset(UnityEngine.Object asset)
+        {
+            if (asset == null || !AssetDatabase.IsMainAsset(asset) || AssetDatabase.IsSubAsset(asset)) throw new InvalidDataException("Select standalone assets, not scene objects, folders, or sub-assets.");
+            string path = AssetDatabase.GetAssetPath(asset);
+            RequireUnlinked(path);
+            RequireUnlinked(path + ".meta");
+            if (EditorUtility.IsDirty(asset)) throw new InvalidDataException("Save your changes to this asset first: " + path);
+            string type = asset.GetType().FullName;
+            string kind = (type == "Unity.VisualScripting.ScriptGraphAsset" || type == "Unity.VisualScripting.StateGraphAsset") && path.EndsWith(".asset", StringComparison.OrdinalIgnoreCase) ? "graph" :
+                asset is GameObject && path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) ? "prefab" : null;
+            return new OrganizationPolicy.Asset { path = path, guid = AssetDatabase.AssetPathToGUID(path), kind = kind };
+        }
+        internal static OrganizationPolicy.Move[] Plan(UnityEngine.Object[] selection)
+        {
+            RequireIdle();
+            if (selection == null || selection.Length == 0 || selection.Length > 64) throw new InvalidDataException("Select 1 to 64 graph assets or prefabs in the Project window.");
+            var plan = OrganizationPolicy.Plan(selection.Select(ReadAsset).ToArray(), AssetDatabase.IsValidFolder, Occupied);
+            foreach (var move in plan) { RequireUnlinked(move.destination); RequireUnlinked(move.destination + ".meta"); }
+            return plan;
+        }
+        internal static int Apply(OrganizationPolicy.Move[] plan)
+        {
+            RequireIdle();
+            if (plan == null || plan.Length == 0 || plan.Length > 64) throw new InvalidDataException("No move plan to confirm.");
+            // Recheck the entire preview before creating a folder or moving the first asset.
+            var current = Plan(plan.Select(m => AssetDatabase.LoadMainAssetAtPath(m.source)).ToArray());
+            if (current.Length != plan.Length || current.Where((m, i) => m.source != plan[i].source || m.destination != plan[i].destination || m.guid != plan[i].guid).Any())
+                throw new InvalidOperationException("The assets or destination changed. Close this preview and select them again.");
+            string folder = Path.GetDirectoryName(plan[0].destination).Replace('\\', '/');
+            if (!AssetDatabase.IsValidFolder(folder))
+            {
+                if (Occupied(folder)) throw new IOException("Destination folder name is already in use.");
+                string guid = AssetDatabase.CreateFolder("Assets", Path.GetFileName(folder));
+                if (string.IsNullOrEmpty(guid) || AssetDatabase.GUIDToAssetPath(guid) != folder) throw new IOException("Could not create the exact destination folder. Nothing moved.");
+            }
+            foreach (var move in plan)
+            {
+                string error = AssetDatabase.ValidateMoveAsset(move.source, move.destination);
+                if (!string.IsNullOrEmpty(error)) throw new IOException("Nothing moved: " + error);
+            }
+            int moved = 0;
+            try
+            {
+                foreach (var move in plan)
+                {
+                    RequireIdle();
+                    RequireUnlinked(move.source); RequireUnlinked(move.destination);
+                    RequireUnlinked(move.destination + ".meta");
+                    if (Occupied(move.destination) || ReadAsset(AssetDatabase.LoadMainAssetAtPath(move.source)).guid != move.guid)
+                        throw new IOException("An asset or destination changed after the preview.");
+                    string error = AssetDatabase.MoveAsset(move.source, move.destination);
+                    if (!string.IsNullOrEmpty(error)) throw new IOException(error);
+                    moved++;
+                    if (AssetDatabase.AssetPathToGUID(move.destination) != move.guid) throw new IOException("The moved asset's identity could not be verified.");
+                }
+            }
+            catch (Exception error) { throw new IOException("Moved " + moved + " of " + plan.Length + " selected assets. Stopped without retrying or overwriting. Check the Project window. " + error.Message, error); }
+            return moved;
+        }
+    }
+
+    internal sealed class OrganizeAssetsWindow : EditorWindow
+    {
+        private OrganizationPolicy.Move[] plan;
+        private Vector2 scroll;
+        private string result;
+        [MenuItem("Creator Plugins/Organize selected assets...")]
+        internal static void Open()
+        {
+            try
+            {
+                var preview = AssetOrganizer.Plan(Selection.objects);
+                var window = GetWindow<OrganizeAssetsWindow>(true, "Organize selected assets", true);
+                window.plan = preview; window.result = null;
+                Rect main = EditorGUIUtility.GetMainWindowPosition();
+                float width = Mathf.Min(600, Mathf.Max(1, main.width - 40));
+                float height = Mathf.Min(420, Mathf.Max(1, main.height - 80));
+                window.minSize = new Vector2(Mathf.Min(420, width), Mathf.Min(260, height));
+                window.position = new Rect(main.x + (main.width - width) / 2, main.y + (main.height - height) / 2, width, height);
+                window.Show();
+            }
+            catch (Exception error) { EditorUtility.DisplayDialog("Organize selected assets", error.Message, "OK"); }
+        }
+        [MenuItem("Creator Plugins/Organize selected assets...", true)]
+        private static bool Available() => !ImportReview.Busy && Selection.objects.Length > 0;
+        private void OnGUI()
+        {
+            EditorGUILayout.HelpBox("Only the selected assets will move. Dependencies, scripts and scenes stay where they are. Asset references are kept. No scene is saved.", MessageType.Info);
+            scroll = EditorGUILayout.BeginScrollView(scroll);
+            if (plan != null) foreach (var move in plan)
+            {
+                GUILayout.Label(move.source, EditorStyles.wordWrappedLabel);
+                GUILayout.Label("To: " + move.destination, EditorStyles.wordWrappedLabel);
+                GUILayout.Space(8);
+            }
+            EditorGUILayout.EndScrollView();
+            if (result != null) EditorGUILayout.HelpBox(result, MessageType.Info);
+            using (new EditorGUI.DisabledScope(plan == null || ImportReview.Busy))
+                if (GUILayout.Button("Move selected assets"))
+                {
+                    try { result = "Organized " + AssetOrganizer.Apply(plan) + " selected assets. Import status has not changed."; }
+                    catch (Exception error) { result = error.Message; }
+                    plan = null;
+                }
+            if (GUILayout.Button(plan == null ? "Close" : "Cancel")) Close();
+        }
+    }
+
     [InitializeOnLoad]
     internal static class ImportReview
     {
@@ -207,28 +383,32 @@ namespace CreatorWorks.Plugins
         {
             PluginProtocol.ValidateRequest(request, Project);
             string path = PluginProtocol.Area(Project, "receipts/" + request.requestId + ".json");
-            if (!File.Exists(path)) return new ImportReceipt { requestId = request.requestId, status = "queued", message = "Ready for your review. Nothing imported." };
+            if (!File.Exists(path))
+            {
+                string activePath = PluginProtocol.Area(Project, "active-review.json");
+                if (File.Exists(activePath))
+                {
+                    var pending = Read<ImportRequest>(activePath);
+                    PluginProtocol.ValidateRequest(pending, Project);
+                    if (pending.requestId == request.requestId)
+                    {
+                        RequireSameRequest(pending, request);
+                        return new ImportReceipt { requestId = request.requestId, status = "review", message = "Review requested. Waiting for Unity's final outcome; nothing confirmed imported yet." };
+                    }
+                }
+                return new ImportReceipt { requestId = request.requestId, status = "queued", message = "Ready for your review. Nothing imported." };
+            }
             var receipt = Read<ImportReceipt>(path);
             if (receipt == null || receipt.schemaVersion != 1 || receipt.requestId != request.requestId || !PluginProtocol.Text(receipt.message, 4000) || !new[] { "queued", "review", "imported", "cancelled", "failed" }.Contains(receipt.status)) throw new InvalidDataException("Invalid import receipt. Existing data was preserved.");
+            if (receipt.status == "queued" || receipt.status == "review") throw new InvalidDataException("This request has an older helper receipt. Existing data was preserved; no import was started.");
             return receipt;
         }
-        internal static ImportReceipt Acknowledge(ImportRequest request)
+        private static void RequireSameRequest(ImportRequest saved, ImportRequest expected)
         {
-            var receipt = Receipt(request);
-            if (!File.Exists(PluginProtocol.Area(Project, "receipts/" + request.requestId + ".json"))) WriteReceipt(request, "queued", "Request received. Package integrity will be checked when you review it. Nothing imported.");
-            return receipt;
+            if (saved.requestId != expected.requestId || saved.sha256 != expected.sha256 || saved.packageFile != expected.packageFile || saved.byteLength != expected.byteLength || saved.packageId != expected.packageId || saved.version != expected.version || saved.name != expected.name)
+                throw new InvalidDataException("Pending review identity changed; existing files were preserved.");
         }
-        private static void WriteReceipt(ImportRequest request, string status, string message)
-        {
-            string relative = "receipts/" + request.requestId + ".json", path = PluginProtocol.Area(Project, relative);
-            Receipt(request);
-            byte[] data = Encoding.UTF8.GetBytes(JsonUtility.ToJson(new ImportReceipt { requestId = request.requestId, status = status, message = message.Length <= 4000 ? message : message.Substring(0, 4000) }));
-            if (!File.Exists(path)) { PluginProtocol.SaveNew(Project, relative, data); return; }
-            string temporary = relative + ".tmp-" + Guid.NewGuid().ToString("N");
-            PluginProtocol.SaveNew(Project, temporary, data);
-            try { PluginProtocol.Area(Project, relative); File.Replace(PluginProtocol.Area(Project, temporary), path, null); }
-            finally { string temp = PluginProtocol.Area(Project, temporary); if (File.Exists(temp)) File.Delete(temp); }
-        }
+        internal static ImportReceipt Acknowledge(ImportRequest request) => Receipt(request);
         internal static void Review(ImportRequest request)
         {
             if (Busy) throw new InvalidOperationException("Wait for Unity to finish, or resolve the pending review first.");
@@ -241,7 +421,6 @@ namespace CreatorWorks.Plugins
                 PluginProtocol.SaveNew(Project, "active-review.json", Encoding.UTF8.GetBytes(JsonUtility.ToJson(request)));
                 Active = request;
                 Recovered = false;
-                WriteReceipt(request, "review", "Review requested. Waiting for Unity's import outcome; nothing confirmed imported yet.");
                 AssetDatabase.ImportPackage(PluginProtocol.Area(Project, "packages/" + request.packageFile), true);
             }
             catch (Exception error)
@@ -254,8 +433,7 @@ namespace CreatorWorks.Plugins
         private static void Started(string name)
         {
             if (!PluginProtocol.MatchesCallback(Active, name)) { otherImport = name; return; }
-            try { WriteReceipt(Active, "review", "Unity started importing the selected files. Completion is not confirmed yet."); }
-            catch (Exception error) { RecoveryError = error.Message; }
+            // Started also fires before approval. The durable active request already represents review.
         }
         private static void Finished(string name, string status, string message)
         {
@@ -272,10 +450,13 @@ namespace CreatorWorks.Plugins
         {
             try
             {
-                WriteReceipt(Active, status, message);
                 string path = PluginProtocol.Area(Project, "active-review.json");
                 var saved = Read<ImportRequest>(path);
-                if (saved == null || saved.requestId != Active.requestId) throw new InvalidDataException("Pending review identity changed; preserved file.");
+                PluginProtocol.ValidateRequest(saved, Project);
+                RequireSameRequest(saved, Active);
+                if (!new[] { "imported", "cancelled", "failed" }.Contains(status)) throw new InvalidDataException("Only a final outcome can be recorded.");
+                var receipt = new ImportReceipt { requestId = Active.requestId, status = status, message = message.Length <= 4000 ? message : message.Substring(0, 4000) };
+                PluginProtocol.SaveNew(Project, "receipts/" + Active.requestId + ".json", Encoding.UTF8.GetBytes(JsonUtility.ToJson(receipt)));
                 File.Delete(path);
                 Active = null; Recovered = false; RecoveryError = null;
             }
@@ -287,8 +468,8 @@ namespace CreatorWorks.Plugins
 
     public sealed class CreatorPluginsWindow : EditorWindow
     {
-        private static readonly string[] Categories = { "All types", "Visual Scripting", "Prefabs", "Plugins", "Editor tools", "Recipes" };
-        private static readonly string[] CategoryKeys = { "", "graph", "prefab", "plugin", "community-tool", "recipe" };
+        private static readonly string[] Categories = { "All types", "Visual Scripting", "Prefabs", "Plugins", "Editor tools", "Recipes", "MCP tools", "AI skills" };
+        private static readonly string[] CategoryKeys = { "", "graph", "prefab", "plugin", "community-tool", "recipe", "mcp-tool", "ai-skill" };
         private readonly List<Listing> listings = new List<Listing>();
         private readonly List<ImportRequest> inbox = new List<ImportRequest>();
         private readonly Dictionary<string, ImportReceipt> receipts = new Dictionary<string, ImportReceipt>();
@@ -429,8 +610,8 @@ namespace CreatorWorks.Plugins
         private void Download(Listing entry)
         {
             if (!Fresh || ImportReview.Busy || request != null || entry.reviewStatus != "listed") return;
+            if (!PluginProtocol.CanImport(entry)) { message = "This item is not a Unity import. Use the desktop download and follow the contributor instructions."; return; }
             string url = PluginProtocol.DownloadUrl(entry.download);
-            if (!new Uri(url).AbsolutePath.EndsWith(".unitypackage", StringComparison.Ordinal)) { message = "ZIP packages are download-only in the desktop app; this helper imports Unity packages only."; return; }
             message = "Downloading verified package to the project cache, outside Assets...";
             Fetch(url, entry.download.byteLength, bytes =>
             {
@@ -491,8 +672,8 @@ namespace CreatorWorks.Plugins
             GUILayout.Label(selected.usage ?? "See contributor instructions.", wrapped);
             GUILayout.Label(selected.testNotes, wrapped);
             if (selected.contents != null) foreach (string file in selected.contents) GUILayout.Label(file, wrapped);
-            if (selected.includesCode) EditorGUILayout.HelpBox("Includes C#. Code can run on import. A checksum is not a safety check.", MessageType.Warning);
-            using (new EditorGUI.DisabledScope(!Fresh || request != null || ImportReview.Busy || selected.reviewStatus != "listed" || selected.download == null)) if (GUILayout.Button("Download for review")) Download(selected);
+            if (selected.includesCode) EditorGUILayout.HelpBox("Review code before installing or running it. Unity C# can run on import; a checksum is not a safety check.", MessageType.Warning);
+            using (new EditorGUI.DisabledScope(!Fresh || request != null || ImportReview.Busy || !PluginProtocol.CanImport(selected))) if (GUILayout.Button("Download for review")) Download(selected);
             if (GUILayout.Button("Full instructions")) Link(PluginProtocol.Repository + "/blob/main/" + selected.instructionsPath);
             if (GUILayout.Button("Licence notes")) Link(PluginProtocol.Repository + "/blob/main/" + selected.licensePath);
             if (!string.IsNullOrEmpty(selected.sourceUrl) && GUILayout.Button("Source")) Link(selected.sourceUrl);
@@ -516,6 +697,8 @@ namespace CreatorWorks.Plugins
                 }
                 catch (Exception error) { GUILayout.Label(error.Message, wrapped); }
             }
+            using (new EditorGUI.DisabledScope(ImportReview.Busy || request != null || Selection.objects.Length == 0))
+                if (GUILayout.Button("Organize selected assets...")) OrganizeAssetsWindow.Open();
         }
         private sealed class BoundedDownload : DownloadHandlerScript
         {
