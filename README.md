@@ -2,7 +2,7 @@
 
 Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases) | [2.7.0 Windows notes](docs/releases/2.7.0.md) | [2.6.0 notes](docs/releases/2.6.0.md)
+[Windows 2.7.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.7.0) | [Release notes](docs/releases/2.7.0.md) | [Linux/macOS 2.6.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
 
 **2.7.0 for Windows** combines the Creator Hub experience with the built-in
 Creator Plugins catalogue and safer upgrades. Browse community contributions,
@@ -17,6 +17,12 @@ tools, client settings, and token-aware profiles remain available.
 Release availability and exact installer acceptance are recorded on the linked
 release page. Do not use the old 2.6.0 Windows installer for a new Hub install;
 existing verified 2.6.0 installations can be upgraded without deleting settings.
+Do not uninstall or delete app data just to make an update appear. Unknown,
+duplicate and historical MSI installations may need explicit attention.
+
+Hub-managed updates require Creator Hub 0.1.0 or newer. Opening MCP inside Hub
+asks for consent and uses MCP's existing settings. [Creator Project Setup](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases)
+is optional; existing MCP users do not need it to keep using their projects.
 
 **2.6.0 brings the first token-efficiency release to stable**, with deep-hierarchy
 and command-status fixes, measured transform receipts, optional local feedback,
@@ -77,7 +83,7 @@ the selected project, and let Unity compile. After reconnecting the MCP client,
 check the project path, bridge version, and selected tool profile before editing.
 The installer alone does not establish compatibility with every SDK or project.
 
-During an EXE upgrade, Setup checks whether its private runtime is still active. If prompted, save your work, fully close Codex, Claude Code, and Creator Works MCP, then select **Retry**. Setup never force-closes those applications; an unattended install exits with code `10` while the runtime is locked.
+During an EXE upgrade, Setup checks whether its private runtime is still active. If prompted, save your work, disconnect MCP in the identified AI client and close the affected app normally, then retry. Hub's **Check again** only checks local status; it does not stop processes. Setup never force-closes those applications; an unattended install exits with code `10` while the runtime is locked.
 
 For the one-time move from the v2.5.0 MSI to the v2.5.1 EXE, close MCP clients before starting Setup. The old MSI must be removed before the new guarded EXE update path takes over.
 
