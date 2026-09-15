@@ -65,16 +65,21 @@ test('Converter remains disabled while Plugins opens the local catalogue', () =>
   assert.match(chrome, /if \(item.getAttribute\('aria-disabled'\) === 'true'\) return/);
 });
 
-test('Plugins uses the shared attributed cube/puzzle mark', () => {
+test('Plugins uses the exact approved shared PNG without the rejected SVG', () => {
   const entry = html.slice(html.indexOf('data-local-view="plugins"'), html.indexOf('</button>', html.indexOf('data-local-view="plugins"')));
-  assert.match(entry, /src="icons\/creator-plugins.svg"/);
+  assert.match(entry, /src="icons\/creator-plugins\.png"/);
   assert.doesNotMatch(entry, /app-letter/);
-  const icon = fs.readFileSync('launcher/src/icons/creator-plugins.svg', 'utf8');
-  assert.match(icon, /lucide-static v1\.44\.0 \(ISC\)/);
-  assert.match(icon, /#00cce8/);
-  assert.match(icon, /#ff4d4d/);
-  assert.doesNotMatch(icon, /<script|<foreignObject|href="https?:/i);
-  assert.match(fs.readFileSync('THIRD_PARTY_NOTICES.md', 'utf8'), /creator-plugins\.svg/);
+  const icon = fs.readFileSync('launcher/src/icons/creator-plugins.png');
+  assert.equal(createHash('sha256').update(icon).digest('hex'),
+    'ff107f1c0bca0380f35f25754fd023d60311fa4457f6fd84255a8f41f78fee6d');
+  assert.equal(icon.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.equal(icon.readUInt32BE(16), 256);
+  assert.equal(icon.readUInt32BE(20), 256);
+  assert.equal(icon[25], 6); // RGBA, preserving the transparent background.
+  assert.equal(fs.existsSync('launcher/src/icons/creator-plugins.svg'), false);
+  const notices = fs.readFileSync('THIRD_PARTY_NOTICES.md', 'utf8');
+  assert.match(notices, /creator-plugins\.png[\s\S]*?AI-generated[\s\S]*?not a Lucide/);
+  assert.doesNotMatch(notices, /creator-plugins\.svg/);
 });
 
 test('result-returning community operations retain the existing workflow guard', async () => {

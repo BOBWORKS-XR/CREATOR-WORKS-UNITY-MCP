@@ -21,7 +21,7 @@ const files = new Map([
   ['/community.js', ['community.js', 'text/javascript']],
   ['/community.css', ['community.css', 'text/css']],
   ['/icons/puzzle.svg', ['icons/puzzle.svg', 'image/svg+xml']],
-  ['/icons/creator-plugins.svg', ['icons/creator-plugins.svg', 'image/svg+xml']],
+  ['/icons/creator-plugins.png', ['icons/creator-plugins.png', 'image/png']],
   ['/icons/folder-open.svg', ['icons/folder-open.svg', 'image/svg+xml']],
   ['/icons/refresh-cw.svg', ['icons/refresh-cw.svg', 'image/svg+xml']],
   ['/icons/download.svg', ['icons/download.svg', 'image/svg+xml']],
@@ -269,11 +269,28 @@ try {
   assert.deepEqual(converterMark,{background:'rgb(0, 0, 0)',radius:'5px',width:34,imageWidth:22,loaded:true,badge:'C'});
   checks.push('official SideQuest Converter mark and non-actionable Converter entry');
   const pluginsMark = await page.locator('[data-local-view="plugins"] .app-icon').evaluate(el => ({
-    source:el.querySelector('img').getAttribute('src'), loaded:el.querySelector('img').complete && el.querySelector('img').naturalWidth === 64,
+    source:el.querySelector('img').getAttribute('src'), loaded:el.querySelector('img').complete && el.querySelector('img').naturalWidth === 256,
     width:el.querySelector('img').width, badges:el.querySelectorAll('.app-letter').length
   }));
-  assert.deepEqual(pluginsMark,{source:'icons/creator-plugins.svg',loaded:true,width:30,badges:0});
-  checks.push('shared cube/puzzle Plugins icon loads without an overlapping letter badge');
+  assert.deepEqual(pluginsMark,{source:'icons/creator-plugins.png',loaded:true,width:30,badges:0});
+  const pixels = await page.locator('[data-local-view="plugins"] img').evaluate(img => {
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 30;
+    const context = canvas.getContext('2d'); context.drawImage(img, 0, 0, 30, 30);
+    const data = context.getImageData(0, 0, 30, 30).data;
+    const counts = { transparent: 0, visible: 0, cyan: 0, red: 0 };
+    for (let i = 0; i < data.length; i += 4) {
+      const [r, g, b, a] = data.subarray(i, i + 4);
+      if (a === 0) counts.transparent++;
+      if (a > 128) {
+        counts.visible++;
+        if (b > 100 && g > 100 && r < 80) counts.cyan++;
+        if (r > 150 && g < 130 && b < 130) counts.red++;
+      }
+    }
+    return counts;
+  });
+  assert.ok(pixels.transparent > 100 && pixels.visible > 100 && pixels.cyan > 3 && pixels.red > 3, JSON.stringify(pixels));
+  checks.push('approved transparent Plugins PNG renders cyan/red artwork at 30px without an overlapping letter badge');
   await page.screenshot({path:path.join(output,'desktop-menu.png')});
   await page.keyboard.press('Escape');
   await closed();
