@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$Installer,
-    [ValidateSet('2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2')][string]$BaselineVersion = '2.6.0',
+    [ValidateSet('2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2', '2.7.0')][string]$BaselineVersion = '2.6.0',
     [string]$BaselineInstaller,
     [string]$ExpectedSourceCommit = $env:GITHUB_SHA,
     [string]$ExpectedInstallerSha256
@@ -16,7 +16,7 @@ $candidate = (Resolve-Path -LiteralPath $Installer).Path
 $candidateRoot = [IO.Path]::GetFullPath((Join-Path $repo 'launcher\src-tauri\target\release\bundle\nsis')) + '\'
 if (-not $candidate.StartsWith($candidateRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Candidate must be built in this checkout.' }
 $version = (Get-Content -LiteralPath (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json).version
-if ($version -ne '2.7.0') { throw 'Review this version-specific acceptance fixture before using another release.' }
+if ($version -ne '2.7.1') { throw 'Review this version-specific acceptance fixture before using another release.' }
 $installRoot = Join-Path $env:LOCALAPPDATA 'Creator Works MCP'
 $configRoot = Join-Path $env:APPDATA 'creator-works-mcp'
 $productKey = 'HKCU:\Software\Creator Works\Creator Works MCP'
@@ -30,6 +30,7 @@ $fixture = Join-Path $env:RUNNER_TEMP ('creator-installed-upgrade-' + [guid]::Ne
 $null = New-Item -ItemType Directory -Path $fixture
 $checks = [Collections.Generic.List[object]]::new()
 $owned = $null
+$ownedSecond = $null
 $unrelated = $null
 
 function Require($condition, [string]$message) { if (-not $condition) { throw $message } }
@@ -117,7 +118,15 @@ try {
     & $sevenZip x $candidate ('-o' + $extracted) '-y' | Out-Null
     Require ($LASTEXITCODE -eq 0) 'Candidate extraction failed.'
     Require (Test-Path -LiteralPath (Join-Path $extracted 'creator-works-mcp-launcher.exe')) 'Installer has no expected launcher payload.'
+    $runtimeStop = Join-Path $extracted '$PLUGINSDIR\creator-mcp-runtime-stop.ps1'
+    Require ($buildInputs.runtimeStopSha256 -cmatch '^[a-f0-9]{64}$') 'Missing build binding for the packaged runtime cleanup.'
+    Require ((Hash $runtimeStop) -ceq $buildInputs.runtimeStopSha256) 'Packaged runtime cleanup differs from the reviewed source.'
     $baselines = @{
+        '2.7.0' = @{
+            asset = 'Creator.Works.MCP_2.7.0_x64-setup.exe'
+            installerSha256 = 'f403da14237a16d3e7a50620d484c60c0a3fbdbb6abfe1ccaf21e4ffb78e1da9'
+            executableSha256 = '0fc9f6023973378778a00b063c383f37f2973eec9d89a96b084391c89f2287cd'
+        }
         '2.6.0' = @{
             asset = 'Creator.Works.MCP_2.6.0_x64-setup.exe'
             installerSha256 = '11d6fc0fb95e33023a90a8722cf9234f82de6e175689bd915401bac3d49bc8c2'
@@ -160,15 +169,32 @@ try {
     $before = Snapshot
     $unrelated = Start-OwnedNode (Get-Command node.exe).Source
     $owned = Start-OwnedNode (Join-Path $installRoot 'server\runtime\node.exe')
+    $ownedSecond = Start-OwnedNode (Join-Path $installRoot 'server\runtime\node.exe')
     Run-Setup $candidate '/S /NS' 10 'Upgrade refuses active installed private runtime'
     Require ((Snapshot) -ceq $before) 'Blocked upgrade altered baseline files/settings/registration.'
     Run-Setup $candidate ('/S /NS /UPDATE /D=' + $installRoot) 10 'Hub update mode refuses active installed private runtime'
     Require ((Snapshot) -ceq $before) 'Blocked Hub upgrade altered baseline files/settings/registration.'
-    Require (-not $owned.Process.HasExited -and -not $unrelated.Process.HasExited) 'Installer stopped a fixture process.'
+    Require (-not $owned.Process.HasExited -and -not $ownedSecond.Process.HasExited -and -not $unrelated.Process.HasExited) 'Installer stopped a fixture process.'
+    # Use the exact script extracted from the candidate installer, not a source
+    # substitute. Native Yes/No/Cancel click-through remains a separate check.
+    & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $runtimeStop -InstallDir $installRoot
+    Require ($LASTEXITCODE -eq 0) 'Packaged runtime cleanup failed.'
+    Require ($owned.Process.WaitForExit(5000) -and $ownedSecond.Process.WaitForExit(5000)) 'Cleanup did not stop both private runtimes.'
+    Require (-not $unrelated.Process.HasExited) 'Cleanup stopped unrelated Node.'
+    Require ((Snapshot) -ceq $before) 'Cleanup altered baseline files/settings/registration.'
+    $checks.Add([pscustomobject]@{ test = 'Packaged cleanup stops multiple old private runtimes, preserves unrelated Node and all baseline files/settings'; passed = $true })
     Close-OwnedNode $owned
     $owned = $null
-    Run-Setup $candidate ('/S /NS /UPDATE /D=' + $installRoot) 0 'Hub installed upgrade succeeds after cooperative runtime exit'
+    Close-OwnedNode $ownedSecond
+    $ownedSecond = $null
+    Run-Setup $candidate ('/S /NS /UPDATE /D=' + $installRoot) 0 'Hub installed upgrade succeeds after confirmed runtime cleanup'
     Verify-Candidate
+    $env:MCP_SHUTDOWN_ENTRY = Join-Path $installRoot 'server\creator-works-mcp.mjs'
+    $env:MCP_SHUTDOWN_NODE = Join-Path $installRoot 'server\runtime\node.exe'
+    & node --test (Join-Path $repo 'test\server-shutdown.test.mjs')
+    Require ($LASTEXITCODE -eq 0) 'Installed runtime/server shutdown acceptance failed.'
+    Remove-Item Env:\MCP_SHUTDOWN_ENTRY,Env:\MCP_SHUTDOWN_NODE
+    $checks.Add([pscustomobject]@{ test = 'Installed private Node and bundled server exit on idle/pending-wait EOF and remain usable while connected'; passed = $true })
     Require (-not $unrelated.Process.HasExited) 'Upgrade stopped an unrelated Node.'
     $checks.Add([pscustomobject]@{ test = 'Installed hashes, settings and unmanaged content preserved'; passed = $true })
 
@@ -189,6 +215,6 @@ try {
     [pscustomobject]@{ passed = $false; baselineVersion = $BaselineVersion; error = $_.Exception.Message; checks = @($checks.ToArray()) } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
     throw
 } finally {
-    try { Close-OwnedNode $owned } finally { Close-OwnedNode $unrelated }
+    try { Close-OwnedNode $owned } finally { try { Close-OwnedNode $ownedSecond } finally { Close-OwnedNode $unrelated } }
     # The disposable runner owns cleanup. Never recursively remove product paths here.
 }

@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$Guard)
+param([Parameter(Mandatory = $true)][string]$Guard, [string]$Stopper)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $powershell = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -105,6 +105,31 @@ try {
             Require (-not $owned.HasExited) 'Preflight terminated the owned waiting process.'
             Check-Code "Unrelated running path preserved: $relative" (Invoke-Guard (Join-Path $fixture 'Unrelated')) 0
             Require (-not $owned.HasExited) 'Preflight terminated an unrelated process.'
+            if ($Stopper) {
+                $callStopper = '-File "' + $Stopper + '" -InstallDir "'
+                Check-Code "Cleanup leaves another installation alone: $relative" (Invoke-RawPowerShell ($callStopper + (Join-Path $fixture 'Unrelated') + '\."')) 0
+                Require (-not $owned.HasExited) 'Cleanup stopped a different installation.'
+                if ($relative -eq 'server\runtime\node.exe') {
+                    $second = [Diagnostics.Process]::Start($psi)
+                    try {
+                        Require (-not $second.HasExited) 'Second owned runtime did not start.'
+                        $beforeStop = File-Hash $exe
+                        $stopped = Invoke-RawPowerShell ($callStopper + $root + '\."')
+                        Check-Code 'Confirmed cleanup stops all exact private runtimes' $stopped 0
+                        Require ($stopped.output -match 'Disconnected 2 private MCP runtime') 'Cleanup did not stop both runtimes.'
+                        Require ($owned.WaitForExit(5000) -and $second.WaitForExit(5000)) 'An approved runtime remained open.'
+                        Require ((File-Hash $exe) -eq $beforeStop) 'Cleanup changed a runtime file.'
+                        Check-Code 'Installer check succeeds after disconnect' (Invoke-Guard $root) 0
+                        Check-Code 'Cleanup with no remaining runtimes is safe' (Invoke-RawPowerShell ($callStopper + $root + '\."')) 0
+                    } finally {
+                        if (-not $second.HasExited) { $second.StandardInput.WriteLine('done'); $second.StandardInput.Close(); Require ($second.WaitForExit(5000)) 'Second owned process did not exit.' }
+                        $second.Dispose()
+                    }
+                } else {
+                    Check-Code "Cleanup never terminates launcher: $relative" (Invoke-RawPowerShell ($callStopper + $root + '\."')) 0
+                    Require (-not $owned.HasExited) 'Cleanup terminated a launcher.'
+                }
+            }
         } finally {
             if (-not $owned.HasExited) { $owned.StandardInput.WriteLine('done'); $owned.StandardInput.Close() }
             Require ($owned.WaitForExit(5000)) 'Owned waiting process did not exit gracefully.'

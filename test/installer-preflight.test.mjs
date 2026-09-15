@@ -21,12 +21,14 @@ test('installed acceptance can run on the approved test branch without publishin
 
 test('stable and alpha upgrades test one build before exposing the accepted candidate', () => {
   const workflow = readFileSync('.github/workflows/windows-installer-acceptance.yml', 'utf8');
-  assert.match(workflow, /baseline: \['2\.6\.0', '2\.7\.0-alpha\.1', '2\.7\.0-alpha\.2'\]/);
+  assert.match(workflow, /baseline: \['2\.6\.0', '2\.7\.0-alpha\.1', '2\.7\.0-alpha\.2', '2\.7\.0'\]/);
   assert.equal((workflow.match(/build --bundles nsis/g) || []).length, 1);
   assert.match(workflow, /accepted-candidate:\s+needs: \[build-candidate, installed-upgrade\]/);
   assert.match(workflow, /EXPECTED_INSTALLER_SHA256: \$\{\{ needs\.build-candidate\.outputs\.installer-sha256 \}\}/);
   const harness = readFileSync('scripts/test-installed-upgrade-ci.ps1', 'utf8');
-  assert.match(harness, /ValidateSet\('2\.6\.0', '2\.7\.0-alpha\.1', '2\.7\.0-alpha\.2'\)/);
+  assert.match(harness, /ValidateSet\('2\.6\.0', '2\.7\.0-alpha\.1', '2\.7\.0-alpha\.2', '2\.7\.0'\)/);
+  assert.match(harness, /Packaged runtime cleanup differs from the reviewed source/);
+  assert.match(harness, /MCP_SHUTDOWN_NODE/);
   assert.match(workflow, /run-id: 34985053768/);
   assert.match(workflow, /name: mcp-windows-stable-candidate/);
   assert.match(harness, /e5997ad60ae7d331b15a0b1038042e8062492589602724206eeb943093113c1e/);
@@ -101,7 +103,8 @@ test('Windows PowerShell preserves installer paths and refuses locked/running ta
   const powershell = path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
   const result = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
     '-File', path.resolve('test/fixtures/installer-preflight-windows.ps1'),
-    '-Guard', path.resolve('launcher/src-tauri/windows/installer-preflight.ps1')], {
+    '-Guard', path.resolve('launcher/src-tauri/windows/installer-preflight.ps1'),
+    '-Stopper', path.resolve('launcher/src-tauri/windows/installer-runtime-stop.ps1')], {
     encoding: 'utf8', windowsHide: true, timeout: 110_000, maxBuffer: 128 * 1024,
   });
   assert.ifError(result.error);

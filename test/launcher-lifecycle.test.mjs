@@ -43,6 +43,8 @@ test('new installer and uninstaller replace the force-kill macro with refusal', 
   assert.match(hook, /Call un\.CreatorMcpPreflight/);
   assert.match(hook, /\$CreatorPreflightPassed != 1/);
   assert.match(guard, /Get-CimInstance Win32_Process/);
-  assert.match(hook, /No applications will be force-closed/);
+  assert.match(hook, /unrelated Node processes will not be closed/);
+  assert.match(hook, /IfSilent creator_preflight_cancel\s+MessageBox MB_ICONEXCLAMATION\|MB_YESNOCANCEL/);
+  assert.match(hook, /IDYES creator_preflight_disconnect IDNO creator_preflight_retry\s+Goto creator_preflight_cancel/);
   assert.doesNotMatch(hook + guard, /KillProcess|Stop-Process|taskkill|TerminateProcess/);
 });

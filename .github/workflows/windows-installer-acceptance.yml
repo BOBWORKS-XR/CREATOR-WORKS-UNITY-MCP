@@ -87,7 +87,8 @@ jobs:
             @{ path = $_.Key; sha256 = (Get-FileHash -LiteralPath $_.Value -Algorithm SHA256).Hash.ToLowerInvariant() }
           })
           $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          @{ schemaVersion = 1; version = $version; sourceCommit = $env:GITHUB_SHA; installerSha256 = $hash; files = $files } |
+          $stopHash = (Get-FileHash -LiteralPath 'launcher/src-tauri/windows/installer-runtime-stop.ps1' -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{ schemaVersion = 1; version = $version; sourceCommit = $env:GITHUB_SHA; installerSha256 = $hash; runtimeStopSha256 = $stopHash; files = $files } |
             ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $directory 'acceptance-inputs.json')
           "installer-sha256=$hash" >> $env:GITHUB_OUTPUT
       - uses: actions/upload-artifact@v4
@@ -108,7 +109,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        baseline: ['2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2']
+        baseline: ['2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2', '2.7.0']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6

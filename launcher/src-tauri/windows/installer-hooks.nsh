@@ -2,6 +2,8 @@
 ; packaged script and -File; append \. so a trailing slash cannot escape a quote.
 !define CREATOR_PREFLIGHT_SCRIPT "${__FILEDIR__}\installer-preflight.ps1"
 ReserveFile "${CREATOR_PREFLIGHT_SCRIPT}"
+!define CREATOR_RUNTIME_STOP_SCRIPT "${__FILEDIR__}\installer-runtime-stop.ps1"
+ReserveFile "${CREATOR_RUNTIME_STOP_SCRIPT}"
 Var CreatorPreflightPassed
 
 ; Modern UI calls this after .onInit restores $INSTDIR and before any page,
@@ -36,9 +38,20 @@ creator_preflight_retry:
 
 creator_preflight_busy:
   IfSilent creator_preflight_cancel
-  MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL \
-    "Creator Works MCP files are in use.$\r$\n$\r$\nSave your work and fully exit Creator Works MCP and AI clients using it: Codex, Claude Code, Antigravity, OpenCode, or another MCP client. Closing only the MCP launcher may leave its private runtime running.$\r$\n$\r$\nThen click Retry, or Cancel to stop Setup. No applications will be force-closed." /SD IDCANCEL \
-    IDRETRY creator_preflight_retry IDCANCEL creator_preflight_cancel
+  MessageBox MB_ICONEXCLAMATION|MB_YESNOCANCEL \
+    "Creator Works MCP files are in use.$\r$\n$\r$\nFinish active AI work and close the MCP launcher. Setup can stop this installation's private MCP runtimes, including stuck connections. Your AI apps, Unity and unrelated Node processes will not be closed. Unity work already submitted may still finish.$\r$\n$\r$\nYes: Disconnect MCP and check again.$\r$\nNo: Check again without stopping anything.$\r$\nCancel: Stop Setup.$\r$\n$\r$\nIf your AI client reconnects automatically, pause or disable this MCP there first. Reconnect after updating." /SD IDCANCEL \
+    IDYES creator_preflight_disconnect IDNO creator_preflight_retry
+  Goto creator_preflight_cancel
+
+creator_preflight_disconnect:
+  ClearErrors
+  File /oname=$PLUGINSDIR\creator-mcp-runtime-stop.ps1 "${CREATOR_RUNTIME_STOP_SCRIPT}"
+  IfErrors creator_preflight_unavailable
+  nsExec::ExecToStack /TIMEOUT=30000 `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\creator-mcp-runtime-stop.ps1" -InstallDir "$3\."`
+  Pop $0
+  Pop $1
+  DetailPrint "$1"
+  StrCmp $0 "0" creator_preflight_retry creator_preflight_unavailable
 
 creator_preflight_unavailable:
   IfSilent creator_preflight_cancel
@@ -47,7 +60,7 @@ creator_preflight_unavailable:
     IDRETRY creator_preflight_retry IDCANCEL creator_preflight_cancel
 
 creator_preflight_cancel:
-  DetailPrint "MCP preflight blocked Setup; no application was force-closed."
+  DetailPrint "MCP preflight blocked Setup. No installation or removal was started."
   SetErrorLevel 10
   Quit
 

@@ -102,6 +102,24 @@ async function main() {
   } else {
     // Stdio transport for Codex, Claude Code, and other MCP clients.
     const transport = new StdioServerTransport();
+    let stopping = false;
+    const shutdown = (code = 0) => {
+      if (stopping) return;
+      stopping = true;
+      // The SDK transport does not close on stdin EOF. Pending Unity polls can
+      // otherwise keep a disconnected client process (and node.exe) alive.
+      // Unity work already dispatched is not cancelled or resubmitted here.
+      const deadline = setTimeout(() => process.exit(code), 1000);
+      deadline.unref();
+      void server.close().finally(() => process.exit(code));
+    };
+    process.stdin.once('end', () => shutdown());
+    process.stdin.once('close', () => shutdown());
+    process.stdin.once('error', () => shutdown(1));
+    process.stdout.once('error', () => shutdown(1));
+    process.once('SIGINT', () => shutdown());
+    process.once('SIGTERM', () => shutdown());
+    server.onclose = () => shutdown();
     await server.connect(transport);
     console.error(
       `Creator Works MCP running on stdio (tool groups: ${describeToolGroupSelection(toolGroupSelection)})`
