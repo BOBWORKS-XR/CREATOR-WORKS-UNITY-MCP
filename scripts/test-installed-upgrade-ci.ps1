@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Installer,
     [ValidateSet('2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2')][string]$BaselineVersion = '2.6.0',
     [string]$BaselineInstaller,
+    [string]$ExpectedSourceCommit = $env:GITHUB_SHA,
     [string]$ExpectedInstallerSha256
 )
 $ErrorActionPreference = 'Stop'
@@ -33,6 +34,31 @@ $unrelated = $null
 
 function Require($condition, [string]$message) { if (-not $condition) { throw $message } }
 function Hash([string]$path) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Save-RefusalDiagnostic([string]$installerPath, [string]$label) {
+    $record = [ordered]@{ label = $label; installerSha256 = Hash $installerPath; installRoot = $installRoot }
+    try {
+        $record.processes = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe' OR Name = 'node' OR Name = 'creator-works-mcp-launcher.exe' OR Name = 'bantworks-mcp-launcher.exe' OR Name = 'banter-mcp-launcher.exe'" -OperationTimeoutSec 8 | Select-Object Name,ProcessId,ExecutablePath)
+        $payload = Join-Path $fixture ('refused-' + [guid]::NewGuid().ToString('N'))
+        & $sevenZip x $installerPath ('-o' + $payload) '$PLUGINSDIR/creator-mcp-preflight.ps1' '-y' | Out-Null
+        $guard = Join-Path $payload '$PLUGINSDIR\creator-mcp-preflight.ps1'
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $guard)) { throw 'Refused installer has no extractable script guard.' }
+        $psi = [Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
+        $psi.Arguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $guard + '" -InstallDir "' + $installRoot + '\."'
+        $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $probe = [Diagnostics.Process]::Start($psi)
+        try {
+            $stdout = $probe.StandardOutput.ReadToEndAsync(); $stderr = $probe.StandardError.ReadToEndAsync()
+            $record.exited = $probe.WaitForExit(20000)
+            $record.elapsedMs = $timer.ElapsedMilliseconds
+            if ($record.exited) { $record.guardExitCode = $probe.ExitCode; $record.stdout = $stdout.Result; $record.stderr = $stderr.Result }
+            else { $record.probePid = $probe.Id; $record.note = 'Diagnostic still running; no process terminated.' }
+        } finally { $probe.Dispose() }
+    } catch { $record.diagnosticError = $_.Exception.Message }
+    $record | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $output 'preflight-refusal.json')
+}
 function Run-Setup([string]$path, [string]$arguments, [int]$expected, [string]$label) {
     $psi = [Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $path
@@ -42,7 +68,10 @@ function Run-Setup([string]$path, [string]$arguments, [int]$expected, [string]$l
     $child = [Diagnostics.Process]::Start($psi)
     try {
         Require ($child.WaitForExit(180000)) "$label exceeded the deadline. No process was force-closed."
-        Require ($child.ExitCode -eq $expected) "$label returned $($child.ExitCode), expected $expected."
+        if ($child.ExitCode -ne $expected) {
+            Save-RefusalDiagnostic $path $label
+            throw "$label returned $($child.ExitCode), expected $expected. See preflight-refusal.json."
+        }
         $checks.Add([pscustomobject]@{ test = $label; exitCode = $child.ExitCode; passed = $true })
     } finally { $child.Dispose() }
 }
@@ -72,9 +101,10 @@ function Verify-Candidate {
 
 try {
     Require ($ExpectedInstallerSha256 -cmatch '^[a-f0-9]{64}$') 'Expected installer hash must come from the build job.'
+    Require ($ExpectedSourceCommit -cmatch '^[a-f0-9]{40}$') 'Expected source revision must come from the verified build run.'
     Require ((Hash $candidate) -ceq $ExpectedInstallerSha256) 'Candidate differs from the exact installer built for both baseline tests.'
     $buildInputs = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $candidate) 'acceptance-inputs.json') -Raw | ConvertFrom-Json
-    Require ($buildInputs.schemaVersion -eq 1 -and $buildInputs.version -ceq $version -and $buildInputs.sourceCommit -ceq $env:GITHUB_SHA -and $buildInputs.installerSha256 -ceq $ExpectedInstallerSha256) 'Build inputs are not from this candidate and source revision.'
+    Require ($buildInputs.schemaVersion -eq 1 -and $buildInputs.version -ceq $version -and $buildInputs.sourceCommit -ceq $ExpectedSourceCommit -and $buildInputs.installerSha256 -ceq $ExpectedInstallerSha256) 'Build inputs are not from this candidate and source revision.'
     $expectedPaths = @('server/runtime/node.exe', 'server/runtime/node', 'server/creator-works-mcp.mjs', 'server/unity-extension/Editor/BanterMCPBridge.cs', 'licenses/LICENSE.txt', 'licenses/THIRD_PARTY_NOTICES.txt', 'licenses/rust-dependencies.json', 'licenses/node-dependencies.json')
     Require (@($buildInputs.files).Count -eq $expectedPaths.Count) 'Build input manifest has an unexpected file count.'
     foreach ($expectedPath in $expectedPaths) {
@@ -153,7 +183,7 @@ try {
 
     # Real GUI/Retry and legacy uninstall-page behavior are deliberately not inferred from /S.
     [pscustomobject]@{ passed = $true; installerSha256 = Hash $candidate; executableSha256 = Hash (Join-Path $extracted 'creator-works-mcp-launcher.exe'); version = $version; checks = @($checks.ToArray());
-        baselineVersion = $BaselineVersion; sourceCommit = $env:GITHUB_SHA; buildInputsVerified = $true;
+        baselineVersion = $BaselineVersion; sourceCommit = $ExpectedSourceCommit; acceptanceCommit = $env:GITHUB_SHA; buildInputsVerified = $true;
         interactiveUpgradeTested = $false; productionUserMachineUsed = $false } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
 } catch {
     [pscustomobject]@{ passed = $false; baselineVersion = $BaselineVersion; error = $_.Exception.Message; checks = @($checks.ToArray()) } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')

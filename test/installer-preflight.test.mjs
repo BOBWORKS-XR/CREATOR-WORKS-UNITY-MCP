@@ -35,8 +35,20 @@ test('stable and alpha upgrades test one build before exposing the accepted cand
   assert.match(harness, /8f39b9f2e120076346873dc8cc3186e6a2c055e1cca4cf9b8b66dfb700f12c41/);
   assert.match(harness, /04971c5c6cc2c3346606d4ae96bbea465c9924b564a1fe928f7d7d006527de65/);
   assert.ok(harness.indexOf('Candidate differs from the exact installer') < harness.indexOf("Run-Setup $baseline '/S /NS'"));
-  assert.match(harness, /sourceCommit -ceq \$env:GITHUB_SHA/);
+  assert.match(harness, /ExpectedSourceCommit = \$env:GITHUB_SHA/);
+  assert.match(harness, /sourceCommit -ceq \$ExpectedSourceCommit/);
   assert.match(harness, /baselineVersion = \$BaselineVersion/);
+});
+
+test('candidate replay pins the original build and never rebuilds or publishes it', () => {
+  const workflow = readFileSync('.github/workflows/windows-candidate-replay.yml', 'utf8');
+  assert.match(workflow, /34999537564/);
+  assert.match(workflow, /8caf8a818ff5654dc255ab2c02fcf7c21525e7d5/);
+  assert.match(workflow, /762258ab39822d38d67810b8fda3b51cd017503178a23d08ecfb340f92282c77/);
+  assert.match(workflow, /accepted-candidate:\s+needs: \[upgrade, lifecycle\]/);
+  assert.doesNotMatch(workflow, /cargo build|tauri.*build|gh release|contents: write/);
+  const diagnostic = readFileSync('scripts/test-installed-upgrade-ci.ps1', 'utf8');
+  assert.match(diagnostic, /if \(\$child.ExitCode -ne \$expected\) \{\s+Save-RefusalDiagnostic/);
 });
 
 test('installed-upgrade CI harness refuses a local machine before resolving installer paths', {
