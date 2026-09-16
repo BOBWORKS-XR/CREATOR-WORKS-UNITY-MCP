@@ -1,6 +1,12 @@
 name: Windows candidate replay (test only)
 on:
   workflow_dispatch:
+    inputs:
+      baseline:
+        description: Replay all upgrade baselines or just the native-prompt route
+        type: choice
+        default: all
+        options: [all, '2.7.0']
   push:
     branches: [feature/community-plugins]
     paths:
@@ -22,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        baseline: ['2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2', '2.7.0']
+        baseline: ${{ fromJSON(inputs.baseline == '2.7.0' && '["2.7.0"]' || '["2.6.0", "2.7.0-alpha.1", "2.7.0-alpha.2", "2.7.0"]') }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6

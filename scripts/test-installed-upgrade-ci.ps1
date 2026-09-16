@@ -222,7 +222,7 @@ try {
         baselineVersion = $BaselineVersion; sourceCommit = $ExpectedSourceCommit; acceptanceCommit = $env:GITHUB_SHA; buildInputsVerified = $true;
         interactivePromptsTested = [bool]$TestInteractivePrompts; interactiveUpgradeTested = $false; productionUserMachineUsed = $false } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
 } catch {
-    [pscustomobject]@{ passed = $false; baselineVersion = $BaselineVersion; error = $_.Exception.Message; checks = @($checks.ToArray()) } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
+    [pscustomobject]@{ passed = $false; baselineVersion = $BaselineVersion; error = $_.Exception.Message; stack = $_.ScriptStackTrace; checks = @($checks.ToArray()) } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
     throw
 } finally {
     try { Close-OwnedNode $owned } finally { try { Close-OwnedNode $ownedSecond } finally { Close-OwnedNode $unrelated } }

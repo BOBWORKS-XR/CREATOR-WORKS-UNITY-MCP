@@ -43,8 +43,14 @@ public static class CreatorInstallerDialogs {
     }
     function Dialogs([Diagnostics.Process]$setup) {
         if ($setup.HasExited) { return }
-        if ([IO.Path]::GetFullPath($setup.MainModule.FileName) -ine [IO.Path]::GetFullPath($Installer)) { throw 'Installer process identity changed.' }
-        foreach ($handle in [CreatorInstallerDialogs]::Windows($setup.Id)) {
+        $windows = @([CreatorInstallerDialogs]::Windows($setup.Id))
+        if ($windows.Count -eq 0) { return }
+        # A newly spawned Process object can cache an empty module list before
+        # Windows loads the image. Resolve identity afresh once it owns a window.
+        $image = (Get-Process -Id $setup.Id -ErrorAction SilentlyContinue).Path
+        if ([string]::IsNullOrWhiteSpace($image)) { return }
+        if ([IO.Path]::GetFullPath($image) -ine [IO.Path]::GetFullPath($Installer)) { throw 'Installer process identity changed.' }
+        foreach ($handle in $windows) {
             if ([CreatorInstallerDialogs]::Class($handle) -ne '#32770') { continue }
             $controls = @([CreatorInstallerDialogs]::Children($handle) | ForEach-Object {
                 [pscustomobject]@{ handle=$_; id=[CreatorInstallerDialogs]::GetDlgCtrlID($_); text=[CreatorInstallerDialogs]::Text($_); class=[CreatorInstallerDialogs]::Class($_) }
