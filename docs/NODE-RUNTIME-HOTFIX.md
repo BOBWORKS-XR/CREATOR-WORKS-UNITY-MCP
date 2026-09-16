@@ -1,6 +1,6 @@
 # Node Runtime Update Hotfix
 
-2026-09-16. Reviewed 2.7.1 release candidate; user installation unchanged. These bytes
+2026-09-16. Public stable 2.7.1; user installation unchanged. These bytes
 must not replace the public 2.7.0 assets. Disposable installer acceptance covers
 2.6.0, 2.7.0-alpha.1, 2.7.0-alpha.2 and 2.7.0 baselines.
 
@@ -46,8 +46,9 @@ before clicking native prompts; the product installer was not changed.
 Hub's first 0.1.3 candidate failed because `disconnect_mcp` was absent from the
 command ACL. That binary is rejected. The corrected exact binary passed all four
 Hub native routes in replay 35039611764, including Cancel and confirmed disconnect.
-A final build now binds MCP 2.7.1 and must pass its own native matrix before Hub
-publication. Its checklist is `docs/MCP-RUNTIME-HOTFIX.md` in the Hub repository.
+A final build binds MCP 2.7.1 and passed all four native routes in 35040103489.
+Public Hub 0.1.3 installs and opens this exact MCP release with preserved settings.
+Its checklist is `docs/MCP-RUNTIME-HOTFIX.md` in the Hub repository.
 
 The user authorized stable publication and sleep only after verification. The
 2.7.1 tag workflow explicitly skips rebuilding/replacing reviewed Windows assets.
@@ -58,3 +59,12 @@ in a Rust test assertion. Local `cargo fmt --check` reproduced it; only line
 wrapping was corrected. Candidate CI now performs that same early format check.
 Accepted installers, executable hashes and release assets are unchanged. This is
 a source/test hygiene correction, not evidence that the packaged upgrade failed.
+
+Public verification: all 16 MCP assets matched staged bytes; anonymous downloads
+passed signature, installed-EXE/installer binding and tamper rejection checks.
+Hub 0.1.3 likewise passed all 20 asset comparisons and updater-feed verification.
+Historical MCP 2.7.0, Hub 0.1.2 and Setup 0.3.0 installers remain unchanged.
+Evidence: `artifacts/node-runtime-hotfix/public-2.7.1-verification.json`.
+Follow-up source CI 35041250085 passed Node 20/22/24 and the Windows format step;
+its broader builds are still running on GitHub, separately from completed exact
+Windows installer acceptance. The user requested PC sleep after release checks.
