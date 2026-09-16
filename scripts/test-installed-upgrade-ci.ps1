@@ -3,7 +3,8 @@ param(
     [ValidateSet('2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2', '2.7.0')][string]$BaselineVersion = '2.6.0',
     [string]$BaselineInstaller,
     [string]$ExpectedSourceCommit = $env:GITHUB_SHA,
-    [string]$ExpectedInstallerSha256
+    [string]$ExpectedInstallerSha256,
+    [switch]$TestInteractivePrompts
 )
 $ErrorActionPreference = 'Stop'
 # This executes real installers. Refuse local and self-hosted environments.
@@ -175,6 +176,15 @@ try {
     Run-Setup $candidate ('/S /NS /UPDATE /D=' + $installRoot) 10 'Hub update mode refuses active installed private runtime'
     Require ((Snapshot) -ceq $before) 'Blocked Hub upgrade altered baseline files/settings/registration.'
     Require (-not $owned.Process.HasExited -and -not $ownedSecond.Process.HasExited -and -not $unrelated.Process.HasExited) 'Installer stopped a fixture process.'
+    if ($TestInteractivePrompts) {
+        . (Join-Path $repo 'test\fixtures\installer-native-prompts.ps1')
+        Test-InstallerRuntimePrompts -Installer $candidate -InstallDir $installRoot -First $owned.Process -Second $ownedSecond.Process -Unrelated $unrelated.Process -VerifyUnchanged { Require ((Snapshot) -ceq $before) 'Interactive preflight changed baseline files/settings/registration.' }
+        $checks.Add([pscustomobject]@{ test = 'Native installer No rechecks without stopping; Cancel preserves both runtimes; Yes stops both while preserving unrelated Node and baseline files'; passed = $true })
+        Close-OwnedNode $owned
+        Close-OwnedNode $ownedSecond
+        $owned = Start-OwnedNode (Join-Path $installRoot 'server\runtime\node.exe')
+        $ownedSecond = Start-OwnedNode (Join-Path $installRoot 'server\runtime\node.exe')
+    }
     # Use the exact script extracted from the candidate installer, not a source
     # substitute. Native Yes/No/Cancel click-through remains a separate check.
     & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $runtimeStop -InstallDir $installRoot
@@ -210,7 +220,7 @@ try {
     # Real GUI/Retry and legacy uninstall-page behavior are deliberately not inferred from /S.
     [pscustomobject]@{ passed = $true; installerSha256 = Hash $candidate; executableSha256 = Hash (Join-Path $extracted 'creator-works-mcp-launcher.exe'); version = $version; checks = @($checks.ToArray());
         baselineVersion = $BaselineVersion; sourceCommit = $ExpectedSourceCommit; acceptanceCommit = $env:GITHUB_SHA; buildInputsVerified = $true;
-        interactiveUpgradeTested = $false; productionUserMachineUsed = $false } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
+        interactivePromptsTested = [bool]$TestInteractivePrompts; interactiveUpgradeTested = $false; productionUserMachineUsed = $false } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
 } catch {
     [pscustomobject]@{ passed = $false; baselineVersion = $BaselineVersion; error = $_.Exception.Message; checks = @($checks.ToArray()) } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'report.json')
     throw

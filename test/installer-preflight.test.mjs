@@ -44,24 +44,34 @@ test('stable and alpha upgrades test one build before exposing the accepted cand
 
 test('candidate replay pins the original build and never rebuilds or publishes it', () => {
   const workflow = readFileSync('.github/workflows/windows-candidate-replay.yml', 'utf8');
-  assert.match(workflow, /35003567089/);
-  assert.match(workflow, /5b65478f126a9cf89c07b6136309d57f7782e40d/);
-  assert.match(workflow, /f403da14237a16d3e7a50620d484c60c0a3fbdbb6abfe1ccaf21e4ffb78e1da9/);
-  assert.match(workflow, /CANDIDATE_EXECUTABLE_SHA256: '0fc9f6023973378778a00b063c383f37f2973eec9d89a96b084391c89f2287cd'/);
+  assert.match(workflow, /35037253293/);
+  assert.match(workflow, /cd0e5c0344955323e34ee12cee452b871002c566/);
+  assert.match(workflow, /4782b6ab04e09a8d24c5fd67d8c75fde8b508d09c04cb1391d953cd51d3aaa66/);
+  assert.match(workflow, /CANDIDATE_EXECUTABLE_SHA256: '6e1ba9d8d4eee99b35b60c9093efd1b3c19183d2cc184266a0696b8a57b0376d'/);
   assert.match(workflow, /accepted-candidate:\s+needs: \[upgrade, lifecycle\]/);
   assert.doesNotMatch(workflow, /cargo build|tauri.*build|gh release|contents: write/);
   const diagnostic = readFileSync('scripts/test-installed-upgrade-ci.ps1', 'utf8');
   assert.match(diagnostic, /if \(\$child.ExitCode -ne \$expected\) \{\s+Save-RefusalDiagnostic/);
 });
 
-test('stable 2.7.0 promotes accepted Windows bytes without a tag rebuild or checksum overwrite', () => {
+test('reviewed stable hotfixes promote accepted Windows bytes without a tag rebuild or checksum overwrite', () => {
   const workflow = readFileSync('.github/workflows/release.yml', 'utf8');
   for (const job of ['windows', 'linux', 'macos', 'checksums']) {
     const body = workflow.split(`\n  ${job}:\r\n`)[1] ?? workflow.split(`\n  ${job}:\n`)[1];
     assert.ok(body, job);
-    assert.match(body.split(/\r?\n  [a-z]+:/)[0], /if: \$\{\{ [^\r\n]*github\.ref_name != 'v2\.7\.0' \}\}/);
+    assert.match(body.split(/\r?\n  [a-z]+:/)[0], /if: \$\{\{ [^\r\n]*github\.ref_name != 'v2\.7\.0' && github\.ref_name != 'v2\.7\.1' \}\}/);
   }
   assert.equal((workflow.match(/!contains\(github\.ref_name, '-'\)/g) || []).length, 3);
+});
+
+test('native installer prompt helper refuses local execution before inspecting windows', { skip: process.platform !== 'win32' }, () => {
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', 'test/fixtures/installer-native-prompts.ps1'], {
+    encoding: 'utf8', windowsHide: true, timeout: 10000,
+    env: { ...process.env, GITHUB_ACTIONS: 'false', RUNNER_ENVIRONMENT: 'self-hosted' },
+  });
+  assert.ifError(result.error);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Native installer prompt acceptance requires a disposable GitHub-hosted Windows runner/);
 });
 
 test('installed-upgrade CI harness refuses a local machine before resolving installer paths', {
