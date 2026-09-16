@@ -52,3 +52,9 @@ publication. Its checklist is `docs/MCP-RUNTIME-HOTFIX.md` in the Hub repository
 The user authorized stable publication and sleep only after verification. The
 2.7.1 tag workflow explicitly skips rebuilding/replacing reviewed Windows assets.
 The release descriptor requires Hub 0.1.3 for the exact new hosting binding.
+
+Post-publication default-branch CI 35040585031 caught a formatting-only failure
+in a Rust test assertion. Local `cargo fmt --check` reproduced it; only line
+wrapping was corrected. Candidate CI now performs that same early format check.
+Accepted installers, executable hashes and release assets are unchanged. This is
+a source/test hygiene correction, not evidence that the packaged upgrade failed.

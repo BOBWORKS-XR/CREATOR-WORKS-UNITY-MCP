@@ -1685,7 +1685,10 @@ mod tests {
         let mut waits = 0;
         let error = publish_helper(&target, staging.path(), |_| waits += 1).unwrap_err();
         assert!(waits > 0 && waits <= HELPER_PUBLISH_RETRIES);
-        assert!(error.contains("os error 5") || error.contains("Timed out"), "{error}");
+        assert!(
+            error.contains("os error 5") || error.contains("Timed out"),
+            "{error}"
+        );
         assert!(error.contains("try again"));
         assert!(!root.path().join(PACKAGE).exists());
         assert_eq!(helper_contents(staging.path(), false).unwrap(), "installed");

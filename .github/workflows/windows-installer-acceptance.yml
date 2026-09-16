@@ -44,6 +44,8 @@ jobs:
           node-version: 24
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --check
+        working-directory: launcher/src-tauri
       - run: npm ci
       - run: npm test
       - run: npm run check:version
