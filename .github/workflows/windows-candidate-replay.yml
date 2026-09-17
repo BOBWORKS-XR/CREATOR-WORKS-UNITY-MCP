@@ -6,7 +6,7 @@ on:
         description: Replay all upgrade baselines or just the native-prompt route
         type: choice
         default: all
-        options: [all, '2.7.0']
+        options: [all, '2.7.1']
   push:
     branches: [feature/community-plugins]
     paths:
@@ -17,10 +17,10 @@ permissions:
   contents: read
   actions: read
 env:
-  CANDIDATE_RUN: '35037253293'
-  CANDIDATE_SOURCE: 'cd0e5c0344955323e34ee12cee452b871002c566'
-  CANDIDATE_SHA256: '4782b6ab04e09a8d24c5fd67d8c75fde8b508d09c04cb1391d953cd51d3aaa66'
-  CANDIDATE_EXECUTABLE_SHA256: '6e1ba9d8d4eee99b35b60c9093efd1b3c19183d2cc184266a0696b8a57b0376d'
+  CANDIDATE_RUN: '35283535011'
+  CANDIDATE_SOURCE: 'c9c0c64a1bdff5008904afbad266089fca52171c'
+  CANDIDATE_SHA256: '13f0e14bf321227f59788f13ec9253dff092891bb3144607e37263d5ee16e2ca'
+  CANDIDATE_EXECUTABLE_SHA256: '815147c99d04fa496c2d6d0d6d984aa99dee7c91b7cd880fefa2488eb089f610'
 jobs:
   upgrade:
     runs-on: windows-latest
@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        baseline: ${{ fromJSON(inputs.baseline == '2.7.0' && '["2.7.0"]' || '["2.6.0", "2.7.0-alpha.1", "2.7.0-alpha.2", "2.7.0"]') }}
+        baseline: ${{ fromJSON(inputs.baseline == '2.7.1' && '["2.7.1"]' || '["2.6.0", "2.7.0-alpha.1", "2.7.0-alpha.2", "2.7.0", "2.7.1"]') }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -61,8 +61,8 @@ jobs:
         run: |
           $extra = @{}
           if ($env:BASELINE_VERSION -ceq '2.7.0-alpha.2') { $extra.BaselineInstaller = 'artifacts\accepted-alpha2-baseline\Creator Works MCP_2.7.0-alpha.2_x64-setup.exe' }
-          if ($env:BASELINE_VERSION -ceq '2.7.0') { $extra.TestInteractivePrompts = $true }
-          .\scripts\test-installed-upgrade-ci.ps1 -Installer 'launcher\src-tauri\target\release\bundle\nsis\Creator Works MCP_2.7.1_x64-setup.exe' -BaselineVersion $env:BASELINE_VERSION -ExpectedInstallerSha256 $env:CANDIDATE_SHA256 -ExpectedSourceCommit $env:CANDIDATE_SOURCE @extra
+          if ($env:BASELINE_VERSION -ceq '2.7.1') { $extra.TestInteractivePrompts = $true }
+          .\scripts\test-installed-upgrade-ci.ps1 -Installer 'launcher\src-tauri\target\release\bundle\nsis\Creator Works MCP_2.7.2_x64-setup.exe' -BaselineVersion $env:BASELINE_VERSION -ExpectedInstallerSha256 $env:CANDIDATE_SHA256 -ExpectedSourceCommit $env:CANDIDATE_SOURCE @extra
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -88,7 +88,7 @@ jobs:
       - name: Verify and extract the exact installer
         shell: powershell
         run: |
-          $installer = 'artifacts\lifecycle-installer\Creator Works MCP_2.7.1_x64-setup.exe'
+          $installer = 'artifacts\lifecycle-installer\Creator Works MCP_2.7.2_x64-setup.exe'
           if ((Get-FileHash -LiteralPath $installer).Hash.ToLowerInvariant() -cne $env:CANDIDATE_SHA256) { throw 'Candidate installer changed.' }
           $inputs = Get-Content artifacts/lifecycle-installer/acceptance-inputs.json -Raw | ConvertFrom-Json
           if ($inputs.sourceCommit -cne $env:CANDIDATE_SOURCE -or $inputs.installerSha256 -cne $env:CANDIDATE_SHA256) { throw 'Candidate source changed.' }
@@ -144,7 +144,7 @@ jobs:
       - name: Verify no rebuild or byte change
         shell: pwsh
         run: |
-          $installer = 'accepted/Creator Works MCP_2.7.1_x64-setup.exe'
+          $installer = 'accepted/Creator Works MCP_2.7.2_x64-setup.exe'
           if ((Get-FileHash -LiteralPath $installer).Hash.ToLowerInvariant() -cne $env:CANDIDATE_SHA256) { throw 'Accepted candidate changed.' }
       - uses: actions/upload-artifact@v4
         with:

@@ -46,10 +46,11 @@ test('stable and alpha upgrades test one build before exposing the accepted cand
 
 test('candidate replay pins the original build and never rebuilds or publishes it', () => {
   const workflow = readFileSync('.github/workflows/windows-candidate-replay.yml', 'utf8');
-  assert.match(workflow, /35037253293/);
-  assert.match(workflow, /cd0e5c0344955323e34ee12cee452b871002c566/);
-  assert.match(workflow, /4782b6ab04e09a8d24c5fd67d8c75fde8b508d09c04cb1391d953cd51d3aaa66/);
-  assert.match(workflow, /CANDIDATE_EXECUTABLE_SHA256: '6e1ba9d8d4eee99b35b60c9093efd1b3c19183d2cc184266a0696b8a57b0376d'/);
+  assert.match(workflow, /35283535011/);
+  assert.match(workflow, /c9c0c64a1bdff5008904afbad266089fca52171c/);
+  assert.match(workflow, /13f0e14bf321227f59788f13ec9253dff092891bb3144607e37263d5ee16e2ca/);
+  assert.match(workflow, /CANDIDATE_EXECUTABLE_SHA256: '815147c99d04fa496c2d6d0d6d984aa99dee7c91b7cd880fefa2488eb089f610'/);
+  assert.match(workflow, /if \(\$env:BASELINE_VERSION -ceq '2\.7\.1'\) \{ \$extra\.TestInteractivePrompts = \$true \}/);
   assert.match(workflow, /accepted-candidate:\s+needs: \[upgrade, lifecycle\]/);
   assert.doesNotMatch(workflow, /cargo build|tauri.*build|gh release|contents: write/);
   const diagnostic = readFileSync('scripts/test-installed-upgrade-ci.ps1', 'utf8');
