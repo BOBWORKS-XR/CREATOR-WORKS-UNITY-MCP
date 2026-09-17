@@ -103,7 +103,7 @@
     await refreshTargets();
   }, 'Preparing the Unity menu... Please wait.'), 'plugins');
   const sendAction = button('Send to Unity for review', 'community-primary', () => projectAction(async () => {
-    outcome = await invoke('queue_community_import', { id: importEntry.id, projectId: projectSelect.value });
+    outcome = await runTransfer('queue_community_import', { id: importEntry.id, projectId: projectSelect.value }, true);
     showOutcome();
   }, 'Preparing the package for Unity review... Please wait.'), 'download');
   const checkAction = button('Check Unity status', 'community-secondary', () => projectAction(async () => {
@@ -112,7 +112,45 @@
   const closeProject = button('Close', 'community-secondary', () => projectDialog.close());
   const projectActions = el('div', 'community-project-actions'); projectActions.append(menuAction, sendAction, checkAction, closeProject);
   projectDialog.append(projectTitle, el('p', 'community-project-info', 'Experimental project integration'), projectLoading, projectLabel, projectPicker, projectPath, projectInfo, projectSafety, projectMessage, projectActions); root.append(projectDialog);
+  const transferPanel = el('div', 'community-transfer'); transferPanel.hidden = true;
+  const transferText = el('span'); transferText.setAttribute('role', 'status');
+  const cancelTransfer = button('Cancel download', 'community-secondary', async () => {
+    if (!activeTransfer) return;
+    const id = activeTransfer;
+    cancelTransfer.disabled = true;
+    try { await invoke('cancel_community_transfer', { operationId: id }); if (activeTransfer === id) transferText.textContent = 'Cancelling download...'; }
+    catch (error) { if (activeTransfer === id) { transferText.textContent = String(error); cancelTransfer.disabled = false; } }
+  }, 'close');
+  transferPanel.append(transferText, cancelTransfer);
+  let activeTransfer = null;
+  async function runTransfer(command, args, inProject = false) {
+    const operationId = crypto.randomUUID(); activeTransfer = operationId;
+    let timer;
+    const started = performance.now();
+    (inProject ? projectDialog : root).append(transferPanel);
+    transferPanel.hidden = false; cancelTransfer.hidden = true; cancelTransfer.disabled = false;
+    transferText.textContent = 'Preparing download...';
+    const poll = async () => {
+      try {
+        const progress = await invoke('community_transfer_status');
+        if (activeTransfer !== operationId) return;
+        if (progress?.id === operationId) {
+          const speed = progress.received / Math.max(1, (performance.now() - started) / 1000);
+          const phase = { downloading: 'Downloading', checking: 'Checking package', review: 'Waiting for approval', queueing: 'Sending to Unity', saving: 'Saving package' }[progress.phase] || 'Working';
+          transferText.textContent = `${phase}: ${bytes(progress.received)} / ${bytes(progress.total)}${progress.phase === 'downloading' ? ` (${bytes(speed)}/s)` : ''}`;
+          cancelTransfer.hidden = progress.cancellable !== true;
+        }
+      } catch { /* The operation result remains authoritative if progress cannot be read. */ }
+      if (activeTransfer === operationId) timer = setTimeout(poll, 250);
+    };
+    timer = setTimeout(poll, 100);
+    try { return await invoke(command, { ...args, operationId }); }
+    finally { activeTransfer = null; clearTimeout(timer); transferPanel.hidden = true; }
+  }
   projectDialog.addEventListener('cancel', event => { if (projectBusy) event.preventDefault(); });
+  window.addEventListener('focus', () => {
+    if (projectDialog.open && !busy && !projectBusy) void projectAction(refreshTargets, 'Rechecking Unity projects...');
+  });
   projectSelect.addEventListener('change', () => { outcome = null; projectMessage.textContent = ''; renderProject(); });
   function fillProjects(selectedId = projectSelect.value) {
     const first = el('option', '', 'Choose a Unity project'); first.value = '';
@@ -267,7 +305,7 @@
     if (busy) return;
     busy = true; refresh.disabled = true; updateDownloads(); status('Choose a destination. The package will be checked before saving.');
     window.dispatchEvent(new CustomEvent('creator-community-busy', { detail: true }));
-    try { status(await invoke('download_community_package', { id: entry.id })); }
+    try { status(await runTransfer('download_community_package', { id: entry.id })); }
     catch (error) { status(String(error), true); }
     finally { busy = false; refresh.disabled = false; updateDownloads(); window.dispatchEvent(new CustomEvent('creator-community-busy', { detail: false })); }
   }

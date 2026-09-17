@@ -1,10 +1,13 @@
 //! Community listings are data, never installation authority or executable commands.
 use reqwest::{blocking::Client, Url};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use sha2::{Digest, Sha256};
+#[cfg(test)]
+use std::io::Write;
 use std::{
     collections::HashSet,
-    io::{Read, Write},
+    io::Read,
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -13,6 +16,8 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 #[path = "community_package.rs"]
 mod package;
+#[path = "community_transfer.rs"]
+pub(crate) mod transfer;
 
 pub const ROOT: &str = "https://raw.githubusercontent.com/SideQuestVR/Creator-Community/main/";
 const REPO: &str = "https://github.com/SideQuestVR/Creator-Community";
@@ -96,6 +101,52 @@ struct Download {
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DownloadIndex {
+    schema_version: u32,
+    downloads: Vec<DownloadOverride>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DownloadOverride {
+    id: String,
+    version: String,
+    download: Download,
+}
+
+fn apply_downloads(entries: &mut [Listing], bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() > 128 * 1024 {
+        return Err("Download index exceeds its size limit.".into());
+    }
+    let index: DownloadIndex =
+        serde_json::from_slice(bytes).map_err(|_| "Invalid download index.")?;
+    if index.schema_version != 1 || index.downloads.len() > 50 {
+        return Err("Unsupported download index.".into());
+    }
+    let mut ids = HashSet::new();
+    for item in &index.downloads {
+        if !text_ok(&item.id, 100)
+            || !ids.insert(&item.id)
+            || semver::Version::parse(&item.version).is_err()
+        {
+            return Err("Invalid download identity.".into());
+        }
+        validate_download(&item.download, transfer::MAX_PACKAGE)?;
+    }
+    // Version-bound and supplemental only. Never replace a legacy checksum.
+    for item in index.downloads {
+        if let Some(entry) = entries.iter_mut().find(|entry| {
+            entry.id == item.id
+                && entry.version == item.version
+                && entry.download.is_none()
+                && entry.review_status == "listed"
+        }) {
+            entry.download = Some(item.download);
+        }
+    }
+    Ok(())
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Index {
     schema_version: u32,
     entries: Vec<String>,
@@ -121,7 +172,7 @@ impl Default for Snapshot {
     }
 }
 #[derive(Default)]
-pub struct Community(Mutex<Option<(Instant, Snapshot)>>);
+pub struct Community(Mutex<Option<(Instant, Snapshot)>>, pub transfer::Transfers);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -305,20 +356,24 @@ impl Listing {
             }
         }
         if let Some(d) = &self.download {
-            if d.byte_length == 0
-                || d.byte_length > MAX_DOWNLOAD
-                || d.sha256.len() != 64
-                || !d
-                    .sha256
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            {
-                return Err("Invalid community download size or checksum.".into());
-            }
-            download_url(d)?;
+            validate_download(d, MAX_DOWNLOAD)?;
         }
         Ok(())
     }
+}
+fn validate_download(d: &Download, max: u64) -> Result<(), String> {
+    if d.byte_length == 0
+        || d.byte_length > max
+        || d.sha256.len() != 64
+        || !d
+            .sha256
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err("Invalid community download size or checksum.".into());
+    }
+    download_url(d)?;
+    Ok(())
 }
 fn download_url(d: &Download) -> Result<String, String> {
     match (&d.url, &d.path) {
@@ -336,29 +391,32 @@ fn download_url(d: &Download) -> Result<String, String> {
         _ => Err("Unapproved community package URL.".into()),
     }
 }
+fn redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|a| {
+        // Signed GitHub asset redirects may contain query parameters, but not a new host.
+        let u = a.url();
+        let asset = u.scheme() == "https"
+            && u.username().is_empty()
+            && u.password().is_none()
+            && u.port().is_none()
+            && matches!(
+                u.host_str(),
+                Some("release-assets.githubusercontent.com" | "objects.githubusercontent.com")
+            );
+        if a.previous().len() < 3 && (web_url(u.as_str(), false) || asset) {
+            a.follow()
+        } else {
+            a.error("Unapproved community redirect")
+        }
+    })
+}
 fn client() -> Result<Client, String> {
     Client::builder()
         .https_only(true)
         .user_agent("Creator-Community-Browser/1")
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(25))
-        .redirect(reqwest::redirect::Policy::custom(|a| {
-            // Signed GitHub asset redirects may contain query parameters, but not a new host.
-            let u = a.url();
-            let asset = u.scheme() == "https"
-                && u.username().is_empty()
-                && u.password().is_none()
-                && u.port().is_none()
-                && matches!(
-                    u.host_str(),
-                    Some("release-assets.githubusercontent.com" | "objects.githubusercontent.com")
-                );
-            if a.previous().len() < 3 && (web_url(u.as_str(), false) || asset) {
-                a.follow()
-            } else {
-                a.error("Unapproved community redirect")
-            }
-        }))
+        .redirect(redirect_policy())
         .build()
         .map_err(|_| "Could not initialize community downloads.".into())
 }
@@ -430,6 +488,13 @@ fn load() -> Result<Snapshot, String> {
         .redirect(reqwest::redirect::Policy::none())
         .build()
     {
+        if let Ok(bytes) = fetch(&media_client, &format!("{ROOT}downloads.json"), 128 * 1024) {
+            if apply_downloads(&mut snapshot.entries, &bytes).is_err() {
+                snapshot.warnings.push(
+                    "Supplemental downloads unavailable. Existing listings are unchanged.".into(),
+                );
+            }
+        }
         match fetch(&media_client, &format!("{ROOT}media.json"), 256 * 1024)
             .and_then(|bytes| parse_media(&bytes))
         {
@@ -526,6 +591,7 @@ pub fn open_link_worker(handle: tauri::AppHandle, id: String, kind: String) -> R
         .map(|_| ())
         .map_err(|_| "Could not open the community link.".into())
 }
+#[cfg(test)]
 fn verify_download(bytes: &[u8], d: &Download) -> Result<(), String> {
     if bytes.len() as u64 != d.byte_length || format!("{:x}", Sha256::digest(bytes)) != d.sha256 {
         return Err(
@@ -534,6 +600,7 @@ fn verify_download(bytes: &[u8], d: &Download) -> Result<(), String> {
     }
     Ok(())
 }
+#[cfg(test)]
 fn save_verified(bytes: &[u8], d: &Download, path: &std::path::Path) -> Result<(), String> {
     verify_download(bytes, d)?;
     let parent = path.parent().ok_or("Invalid download location.")?;
@@ -548,7 +615,11 @@ fn save_verified(bytes: &[u8], d: &Download, path: &std::path::Path) -> Result<(
     })?;
     Ok(())
 }
-pub fn download_worker(handle: tauri::AppHandle, id: String) -> Result<String, String> {
+pub fn download_worker(
+    handle: tauri::AppHandle,
+    id: String,
+    operation_id: Option<String>,
+) -> Result<String, String> {
     let entry = selected(&handle, &id, true)?;
     if entry.review_status != "listed" {
         return Err("This contribution is awaiting review. Download is not enabled.".into());
@@ -575,8 +646,22 @@ pub fn download_worker(handle: tauri::AppHandle, id: String) -> Result<String, S
     let path = path
         .into_path()
         .map_err(|_| "Choose a local download location.")?;
-    let bytes = fetch(&client()?, &url, d.byte_length)?;
-    save_verified(&bytes, d, &path)?;
+    let state = handle.state::<Community>();
+    let active = state.1.begin(operation_id, d.byte_length)?;
+    let parent = path.parent().ok_or("Invalid download location.")?;
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(parent).map_err(|_| "Cannot write to this folder.")?;
+    transfer::download(
+        &url,
+        d.byte_length,
+        &d.sha256,
+        temporary.as_file_mut(),
+        &active.operation,
+    )?;
+    active.operation.phase("saving")?;
+    temporary
+        .persist_noclobber(&path)
+        .map_err(|_| "The destination exists or could not be saved. Nothing was overwritten.")?;
     Ok(format!(
         "Saved to {}. Checksum matched; no files were imported into Unity.",
         path.display()
@@ -612,6 +697,7 @@ pub fn queue_import_worker(
     handle: tauri::AppHandle,
     id: String,
     project_id: String,
+    operation_id: Option<String>,
 ) -> Result<crate::community_project::Outcome, String> {
     require_import_preview()?;
     let entry = selected(&handle, &id, true)?;
@@ -620,9 +706,32 @@ pub fn queue_import_worker(
     if target.helper != "installed" {
         return Err("Add the matching Unity menu before sending packages to this project.".into());
     }
-    let bytes = fetch(&client()?, &download_url(download)?, download.byte_length)?;
-    verify_download(&bytes, download)?;
-    let review = package::inspect(&bytes)?;
+    let state = handle.state::<Community>();
+    let active = state.1.begin(operation_id, download.byte_length)?;
+    let mut temporary =
+        tempfile::tempfile().map_err(|_| "Cannot create the temporary download.")?;
+    transfer::download(
+        &download_url(download)?,
+        download.byte_length,
+        &download.sha256,
+        &mut temporary,
+        &active.operation,
+    )?;
+    active.operation.phase("checking")?;
+    let review = package::inspect_file(&mut temporary, active.operation.cancelled())?;
+    // Large transfers can outlive the catalogue TTL. Refresh automatically,
+    // then compare the same package identity before asking for approval.
+    catalogue_worker(handle.clone(), true)?;
+    let refreshed = selected(&handle, &id, true)?;
+    let refreshed_download = importable(&refreshed)?;
+    if refreshed.version != entry.version
+        || refreshed_download.sha256 != download.sha256
+        || refreshed_download.byte_length != download.byte_length
+        || download_url(refreshed_download)? != download_url(download)?
+    {
+        return Err("The listing changed during download. No package was queued.".into());
+    }
+    active.operation.phase("review")?;
     let approved = handle.dialog().message(format!("Send {} {} to {} for review?\n\n{}\nUnity {} / {}\n\n{}\n\nThe verified package will be queued outside Assets. In Unity, use Creator Plugins > Browse to review file selection and decide whether to import. Code may execute on import. No scene will be saved automatically.", entry.name, entry.version, target.name, target.path, target.unity_version, target.sdk, review.summary(std::path::Path::new(&target.path)))).title("Review package contents").kind(MessageDialogKind::Warning).buttons(MessageDialogButtons::OkCancelCustom("Send for review".into(), "Cancel".into())).blocking_show();
     if !approved {
         return Ok(crate::community_project::Outcome {
@@ -636,22 +745,75 @@ pub fn queue_import_worker(
     let current_download = importable(&current)?;
     if current.version != entry.version
         || current_download.sha256 != download.sha256
+        || current_download.byte_length != download.byte_length
         || download_url(current_download)? != download_url(download)?
     {
         return Err("The listing changed. Refresh and review it again before sending.".into());
     }
-    crate::community_project::queue(
+    active.operation.phase("queueing")?;
+    crate::community_project::queue_stream(
         &target,
         &entry.id,
         &entry.version,
         &entry.name,
         &download.sha256,
-        &bytes,
+        &mut temporary,
+        download.byte_length,
     )
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn supplemental_large_downloads_preserve_legacy_entries_and_identity() {
+        let mut entry: Listing = serde_json::from_str(include_str!(
+            "../../tests/fixtures/community/start-location.json"
+        ))
+        .unwrap();
+        entry.review_status = "listed".into();
+        let legacy = entry.download.take().unwrap();
+        let mut entries = vec![entry.clone()];
+        let mut sidecar = serde_json::json!({"schemaVersion":1,"downloads":[{"id":entry.id,"version":entry.version,"download":{"url":"https://cdn.sidequestvr.com/file/1/test.unitypackage","byteLength":93_245_650,"sha256":"a".repeat(64)}}]});
+        entry.validate().unwrap();
+        apply_downloads(&mut entries, &serde_json::to_vec(&sidecar).unwrap()).unwrap();
+        assert_eq!(
+            entries[0].download.as_ref().unwrap().byte_length,
+            93_245_650
+        );
+        assert!(importable(&entries[0]).is_ok());
+        assert!(
+            entries[0].validate().is_err(),
+            "large metadata must stay out of legacy listing.json"
+        );
+        entries[0] = entry.clone();
+        entries[0].download = Some(legacy.clone());
+        apply_downloads(&mut entries, &serde_json::to_vec(&sidecar).unwrap()).unwrap();
+        assert_eq!(entries[0].download.as_ref().unwrap().sha256, legacy.sha256);
+        entries[0] = entry.clone();
+        sidecar["downloads"][0]["version"] = "9.0.0".into();
+        apply_downloads(&mut entries, &serde_json::to_vec(&sidecar).unwrap()).unwrap();
+        assert!(entries[0].download.is_none());
+        sidecar["downloads"][0]["version"] = entry.version.into();
+        sidecar["downloads"][0]["download"]["byteLength"] = (transfer::MAX_PACKAGE + 1).into();
+        assert!(apply_downloads(&mut entries, &serde_json::to_vec(&sidecar).unwrap()).is_err());
+        assert!(entries[0].download.is_none());
+    }
+    #[test]
+    #[ignore = "Downloads the explicitly supplied 93 MB package to a temporary file, inspects it, then removes it. No Unity import"]
+    fn supplied_large_package_streams_and_inspects() {
+        let state = transfer::Transfers::default();
+        let active = state.begin(None, 93_245_650).unwrap();
+        let mut file = tempfile::tempfile().unwrap();
+        transfer::download("https://cdn.sidequestvr.com/file/4601616/optics-warehouse-loft-unity-urp-ver-6000321f1-prefab.unitypackage", 93_245_650, "b9a99519a74bdbd5d75d997bed87118896c39a4d712b9ff708e63520ea4fdf94", &mut file, &active.operation).unwrap();
+        let review = package::inspect_file(&mut file, active.operation.cancelled()).unwrap();
+        println!(
+            "LARGE_PACKAGE_VERIFIED bytes=93245650 assets={} code={} scenes={}",
+            review.assets.len(),
+            review.assets.iter().filter(|a| a.code).count(),
+            review.assets.iter().filter(|a| a.scene).count()
+        );
+        assert!(!review.assets.is_empty());
+    }
     #[test]
     fn media_sidecar_is_optional_bounded_and_requires_static_posters() {
         let image = serde_json::json!({"type":"image", "url":"assets/example/front.png"});

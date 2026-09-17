@@ -112,3 +112,5 @@ body:has(#view-plugins:not(.hidden)) #suite-shell { position: absolute; }
   .community-sort { width: 118px; padding: 0 6px; }
   .community-toolbar { gap: 6px; } .community-search { padding: 0 8px; }
 }
+.community-transfer:not([hidden]) { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 0; }
+.community-transfer > span { overflow-wrap: anywhere; }

@@ -1,6 +1,6 @@
 [package]
 name = "creator-works-mcp-launcher"
-version = "2.7.1"
+version = "2.7.2"
 description = "Creator Works MCP Configuration Launcher"
 authors = ["Creator Works"]
 license = "MIT"
@@ -26,6 +26,7 @@ semver = "1"
 tempfile = "3"
 fs2 = "0.4"
 getrandom = "0.3"
+tokio = { version = "1", features = ["macros", "time"] }
 flate2 = "=1.1.10"
 tar = "=0.4.46"
 

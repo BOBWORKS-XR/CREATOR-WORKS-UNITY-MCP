@@ -2,11 +2,12 @@
 use flate2::read::GzDecoder;
 use std::{
     collections::{BTreeMap, HashSet},
-    io::Read,
+    io::{Read, Seek},
     path::Path,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
-const MAX_EXPANDED: u64 = 128 * 1024 * 1024;
+const MAX_EXPANDED: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_RECORDS: usize = 20_000;
 
 #[derive(Debug)]
@@ -24,7 +25,8 @@ pub struct Review {
 #[derive(Default)]
 struct Record {
     path: Option<String>,
-    meta: Option<String>,
+    meta: bool,
+    folder: bool,
     asset: bool,
 }
 
@@ -52,26 +54,64 @@ fn asset_path(value: &str) -> bool {
         && !value.to_ascii_lowercase().ends_with(".meta")
 }
 
+#[cfg(test)]
 pub fn inspect(bytes: &[u8]) -> Result<Review, String> {
     inspect_bounded(bytes, MAX_EXPANDED, MAX_RECORDS)
 }
 
+#[cfg(test)]
 fn inspect_bounded(bytes: &[u8], max_expanded: u64, max_records: usize) -> Result<Review, String> {
-    if bytes.len() > 32 * 1024 * 1024 {
+    if bytes.len() as u64 > super::transfer::MAX_PACKAGE {
         return Err("Package exceeds the download limit.".into());
     }
-    let mut expanded = Vec::new();
-    GzDecoder::new(bytes)
-        .take(max_expanded + 1)
-        .read_to_end(&mut expanded)
-        .map_err(|_| "Package is not a complete gzip archive.")?;
-    if expanded.len() as u64 > max_expanded {
-        return Err("Expanded package exceeds the review limit.".into());
+    inspect_reader(bytes, max_expanded, max_records, &AtomicBool::new(false))
+}
+
+pub fn inspect_file(file: &mut std::fs::File, cancel: &AtomicBool) -> Result<Review, String> {
+    if file
+        .metadata()
+        .map_err(|_| "Cannot read package size.")?
+        .len()
+        > super::transfer::MAX_PACKAGE
+    {
+        return Err("Package exceeds the download limit.".into());
     }
-    let mut archive = tar::Archive::new(expanded.as_slice());
+    file.rewind().map_err(|_| "Cannot read package.")?;
+    inspect_reader(file, MAX_EXPANDED, MAX_RECORDS, cancel)
+}
+
+struct CheckedReader<'a, R> {
+    inner: R,
+    cancel: &'a AtomicBool,
+}
+impl<R: Read> Read for CheckedReader<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.cancel.load(Ordering::SeqCst) {
+            return Err(std::io::Error::other("Package check cancelled."));
+        }
+        let bound = buffer.len().min(64 * 1024);
+        self.inner.read(&mut buffer[..bound])
+    }
+}
+
+fn inspect_reader(
+    reader: impl Read,
+    max_expanded: u64,
+    max_records: usize,
+    cancel: &AtomicBool,
+) -> Result<Review, String> {
+    let expanded = CheckedReader {
+        inner: GzDecoder::new(reader).take(max_expanded + 1),
+        cancel,
+    };
+    let mut archive = tar::Archive::new(expanded);
     let mut records: BTreeMap<String, Record> = BTreeMap::new();
     let mut members = HashSet::new();
-    for member in archive.entries().map_err(|_| "Invalid package archive.")? {
+    for member in archive
+        .entries()
+        .map_err(|_| "Invalid package archive.")?
+        .raw(true)
+    {
         let mut member = member.map_err(|_| "Invalid package archive member.")?;
         let name = String::from_utf8(member.path_bytes().into_owned())
             .map_err(|_| "Invalid archive path.")?;
@@ -110,16 +150,32 @@ fn inspect_bounded(bytes: &[u8], max_expanded: u64, max_records: usize) -> Resul
             if file == "pathname" {
                 record.path = Some(text.trim_end_matches(['\r', '\n']).to_owned());
             } else {
-                record.meta = Some(text);
+                let ids: Vec<_> = text
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("guid: "))
+                    .collect();
+                if ids.len() != 1 || !ids[0].trim().eq_ignore_ascii_case(id) {
+                    return Err("Package GUID does not match its asset metadata.".into());
+                }
+                record.meta = true;
+                record.folder = text.lines().any(|line| line == "folderAsset: yes");
             }
         }
+    }
+    // Drain padding and the gzip footer: a valid TAR prefix cannot hide a
+    // truncated gzip or expansion bomb after the end-of-archive records.
+    let mut expanded = archive.into_inner();
+    std::io::copy(&mut expanded, &mut std::io::sink())
+        .map_err(|_| "Package check cancelled or gzip archive is incomplete.")?;
+    if expanded.inner.limit() == 0 {
+        return Err("Expanded package exceeds the review limit.".into());
     }
     if records.is_empty() {
         return Err("Package has no Unity assets.".into());
     }
     let mut destinations = HashSet::new();
     let mut assets = Vec::new();
-    for (id, record) in records {
+    for record in records.into_values() {
         let path = record.path.ok_or("Package asset has no pathname.")?;
         if !asset_path(&path) {
             return Err("Package contains an unsafe or non-Assets destination.".into());
@@ -127,15 +183,10 @@ fn inspect_bounded(bytes: &[u8], max_expanded: u64, max_records: usize) -> Resul
         if !destinations.insert(path.to_ascii_lowercase()) {
             return Err("Package has conflicting destination paths.".into());
         }
-        let meta = record.meta.ok_or("Package asset has no metadata.")?;
-        let ids: Vec<_> = meta
-            .lines()
-            .filter_map(|line| line.strip_prefix("guid: "))
-            .collect();
-        if ids.len() != 1 || !ids[0].trim().eq_ignore_ascii_case(&id) {
-            return Err("Package GUID does not match its asset metadata.".into());
+        if !record.meta {
+            return Err("Package asset has no metadata.".into());
         }
-        if !record.asset && !meta.lines().any(|line| line == "folderAsset: yes") {
+        if !record.asset && !record.folder {
             return Err("Package asset payload is missing.".into());
         }
         let lower = path.to_ascii_lowercase();
@@ -328,8 +379,13 @@ mod tests {
     fn inspect_selected_package() {
         let path =
             std::env::var_os("CREATOR_PLUGIN_INSPECT_PACKAGE").expect("Select a local package");
-        let bytes = std::fs::read(path).unwrap();
-        let review = inspect(&bytes).unwrap();
-        println!("{review:#?}");
+        let mut file = std::fs::File::open(path).unwrap();
+        let review = inspect_file(&mut file, &AtomicBool::new(false)).unwrap();
+        println!(
+            "{} assets; {} code files; {} scenes",
+            review.assets.len(),
+            review.assets.iter().filter(|a| a.code).count(),
+            review.assets.iter().filter(|a| a.scene).count()
+        );
     }
 }

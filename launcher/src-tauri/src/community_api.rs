@@ -18,10 +18,11 @@ pub async fn community_catalogue(
 pub async fn download_community_package(
     handle: tauri::AppHandle,
     id: String,
+    operation_id: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let _command = LIFECYCLE.command().map_err(str::to_owned)?;
-        community::download_worker(handle, id)
+        community::download_worker(handle, id, operation_id)
     })
     .await
     .map_err(|_| "Community download worker failed.".to_owned())?
@@ -83,10 +84,11 @@ pub async fn queue_community_import(
     handle: tauri::AppHandle,
     id: String,
     project_id: String,
+    operation_id: Option<String>,
 ) -> Result<community_project::Outcome, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let _command = LIFECYCLE.command().map_err(str::to_owned)?;
-        community::queue_import_worker(handle, id, project_id)
+        community::queue_import_worker(handle, id, project_id, operation_id)
     })
     .await
     .map_err(|_| "Community import-queue worker failed.".to_owned())?
@@ -104,4 +106,25 @@ pub async fn community_import_status(
     })
     .await
     .map_err(|_| "Community import-status worker failed.".to_owned())?
+}
+
+#[tauri::command]
+pub fn community_transfer_status(
+    handle: tauri::AppHandle,
+) -> Result<Option<community::transfer::Progress>, String> {
+    use tauri::Manager;
+    let _guard = LIFECYCLE.command().map_err(str::to_owned)?;
+    handle.state::<community::Community>().1.status()
+}
+#[tauri::command]
+pub fn cancel_community_transfer(
+    handle: tauri::AppHandle,
+    operation_id: String,
+) -> Result<(), String> {
+    use tauri::Manager;
+    let _guard = LIFECYCLE.command().map_err(str::to_owned)?;
+    handle
+        .state::<community::Community>()
+        .1
+        .cancel(&operation_id)
 }

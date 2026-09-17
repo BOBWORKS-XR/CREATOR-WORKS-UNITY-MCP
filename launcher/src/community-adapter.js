@@ -1,6 +1,6 @@
 (() => {
   const guarded = new Set(['download_community_package', 'choose_community_project', 'install_community_menu', 'queue_community_import']);
-  const allowed = new Set([...guarded, 'community_catalogue', 'open_community_link', 'community_projects', 'community_import_status']);
+  const allowed = new Set([...guarded, 'community_catalogue', 'open_community_link', 'community_projects', 'community_import_status', 'community_transfer_status', 'cancel_community_transfer']);
   window.CreatorCommunityInvoke = async (command, args = {}) => {
     await window.CreatorRuntime.ready;
     if (window.CreatorRuntime.hosted || !allowed.has(command)) {

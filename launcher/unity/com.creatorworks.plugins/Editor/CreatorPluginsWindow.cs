@@ -18,6 +18,8 @@ namespace CreatorWorks.Plugins
     [Serializable] internal sealed class Author { public string name, url, discord; }
     [Serializable] internal sealed class Compatibility { public string[] unity, creatorSdk, banterSdk; }
     [Serializable] internal sealed class PackageDownload { public string url, path, sha256; public long byteLength; }
+    [Serializable] internal sealed class SupplementalDownload { public string id, version; public PackageDownload download; }
+    [Serializable] internal sealed class DownloadIndex { public int schemaVersion; public SupplementalDownload[] downloads; }
     [Serializable] internal sealed class PreviewMedia { public string type, url, poster; }
     [Serializable] internal sealed class Gallery { public string id; public PreviewMedia[] items; }
     [Serializable] internal sealed class MediaIndex { public int schemaVersion; public Gallery[] galleries; }
@@ -49,7 +51,7 @@ namespace CreatorWorks.Plugins
     {
         internal const string Root = "https://raw.githubusercontent.com/SideQuestVR/Creator-Community/main/";
         internal const string Repository = "https://github.com/SideQuestVR/Creator-Community";
-        internal const long MaxPackage = 32 * 1024 * 1024;
+        internal const long MaxPackage = 256 * 1024 * 1024;
         internal static bool Hex(string value, int length) => value != null && value.Length == length && value.All(c => c >= '0' && c <= '9' || c >= 'a' && c <= 'f');
         internal static bool Text(string value, int max) => !string.IsNullOrWhiteSpace(value) && value.Length <= max && !value.Any(c => char.IsControl(c) && c != '\n' && c != '\t');
         internal static string ReceiptMessage(string value)
@@ -98,6 +100,23 @@ namespace CreatorWorks.Plugins
             return index.galleries;
         }
         internal static string StaticPreview(PreviewMedia item) => item.type == "image" ? item.url : item.poster;
+        internal static void ApplyDownloads(List<Listing> entries, byte[] bytes)
+        {
+            if (bytes.Length > 128 * 1024) throw new InvalidDataException("Download index exceeds its size limit.");
+            var index = JsonUtility.FromJson<DownloadIndex>(Encoding.UTF8.GetString(bytes));
+            if (index == null || index.schemaVersion != 1 || index.downloads == null || index.downloads.Length > 50) throw new InvalidDataException("Invalid download index.");
+            var ids = new HashSet<string>();
+            foreach (var item in index.downloads)
+            {
+                if (item == null || !Id(item.id) || !Version(item.version) || !ids.Add(item.id)) throw new InvalidDataException("Invalid download identity.");
+                DownloadUrl(item.download);
+            }
+            foreach (var item in index.downloads)
+            {
+                var entry = entries.FirstOrDefault(e => e.id == item.id && e.version == item.version && e.download == null && e.reviewStatus == "listed");
+                if (entry != null) entry.download = item.download;
+            }
+        }
         internal static string DownloadUrl(PackageDownload download)
         {
             if (download == null || download.byteLength <= 0 || download.byteLength > MaxPackage || !Hex(download.sha256, 64)) throw new InvalidDataException("Invalid package size or checksum.");
@@ -166,7 +185,42 @@ namespace CreatorWorks.Plugins
         }
         internal static void Verify(byte[] bytes, long length, string hash)
         {
-            using (var stream = new MemoryStream(bytes, false)) if (bytes.LongLength != length || Hash(stream) != hash) throw new InvalidDataException("Package size or checksum did not match. Nothing imported.");
+            using (var stream = new MemoryStream(bytes, false)) VerifyStream(stream, length, hash);
+        }
+        internal static void VerifyStream(Stream stream, long length, string hash)
+        {
+            if (length <= 0 || length > MaxPackage || stream.Length != length) throw new InvalidDataException("Package size did not match. Nothing imported.");
+            stream.Position = 0;
+            if (Hash(stream) != hash) throw new InvalidDataException("Package checksum did not match. Nothing imported.");
+            stream.Position = 0;
+        }
+        internal static void VerifyFile(string path, long length, string hash)
+        {
+            using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)) VerifyStream(file, length, hash);
+        }
+        internal static void SavePackage(string project, string relative, Stream source, long length, string hash)
+        {
+            VerifyStream(source, length, hash);
+            string path = Area(project, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            Area(project, relative);
+            string temporary = Area(project, Path.Combine(Path.GetDirectoryName(relative), ".tmp-" + Guid.NewGuid().ToString("N")));
+            try
+            {
+                using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+                {
+                    var buffer = new byte[64 * 1024]; long copied = 0; int count;
+                    while ((count = source.Read(buffer, 0, buffer.Length)) != 0)
+                    {
+                        copied += count;
+                        if (copied > length) throw new InvalidDataException("Package changed during caching.");
+                        file.Write(buffer, 0, count);
+                    }
+                    VerifyStream(file, length, hash); file.Flush(true);
+                }
+                Area(project, relative); File.Move(temporary, path);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
         internal static FileStream LockPackage(ImportRequest request, string project)
         {
@@ -501,8 +555,12 @@ namespace CreatorWorks.Plugins
         }
         internal static void Enqueue(string project, ImportRequest request, byte[] package = null)
         {
+            using (var stream = package == null ? null : new MemoryStream(package, false)) EnqueueStream(project, request, stream);
+        }
+        internal static void EnqueueStream(string project, ImportRequest request, Stream package)
+        {
             PluginProtocol.ValidateRequest(request, project);
-            if (package != null) PluginProtocol.Verify(package, request.byteLength, request.sha256);
+            if (package != null) PluginProtocol.VerifyStream(package, request.byteLength, request.sha256);
             byte[] requestBytes = Encoding.UTF8.GetBytes(JsonUtility.ToJson(request));
             if (requestBytes.Length > 16 * 1024) throw new InvalidDataException("Import request exceeds its metadata limit.");
             using (new PluginQueueLock(project))
@@ -516,7 +574,7 @@ namespace CreatorWorks.Plugins
                 foreach (string relative in new[] { "inbox/", "history/requests/", "receipts/" })
                     if (Exists(PluginProtocol.Area(project, relative + request.requestId + ".json"))) throw new InvalidDataException("Import request identifier already exists. Nothing was overwritten.");
                 string cache = PluginProtocol.Area(project, "packages/" + request.packageFile);
-                if (Exists(cache)) PluginProtocol.Verify(PluginProtocol.ReadBounded(cache, PluginProtocol.MaxPackage), request.byteLength, request.sha256);
+                if (Exists(cache)) PluginProtocol.VerifyFile(cache, request.byteLength, request.sha256);
                 else if (package == null) throw new InvalidDataException("The checked package is missing. Nothing was queued.");
                 foreach (var item in items.Where(value => value.finalBytes != null))
                 {
@@ -530,7 +588,7 @@ namespace CreatorWorks.Plugins
                     if (!PluginProtocol.ReadBounded(destination, 16 * 1024).SequenceEqual(item.bytes))
                         throw new InvalidDataException("Plugin request changed during archival. Inspect its preserved history before continuing.");
                 }
-                if (!Exists(cache)) PluginProtocol.SaveNew(project, "packages/" + request.packageFile, package);
+                if (!Exists(cache)) PluginProtocol.SavePackage(project, "packages/" + request.packageFile, package, request.byteLength, request.sha256);
                 PluginProtocol.SaveNew(project, "inbox/" + request.requestId + ".json", requestBytes);
             }
         }
@@ -674,6 +732,7 @@ namespace CreatorWorks.Plugins
         private double previewDeadline;
         private UnityWebRequest request;
         private Action<byte[]> success;
+        private Action<Stream> packageSuccess;
         private Action<string> failure;
         private double deadline, catalogueDeadline, catalogueLoadedAt, nextPoll;
         private bool catalogueFresh;
@@ -687,25 +746,31 @@ namespace CreatorWorks.Plugins
         private void OnEnable() { gridView = EditorPrefs.GetString(LayoutPreference, "grid") != "list"; EditorApplication.update += Tick; EditorApplication.delayCall += LoadWhenOpened; nextPoll = 0; }
         private void OnDisable() { EditorApplication.update -= Tick; EditorApplication.delayCall -= LoadWhenOpened; StopDownload(); ClearPreviews(); }
         private void LoadWhenOpened() { if (this != null && listings.Count == 0 && request == null && !ImportReview.Busy) RefreshCatalogue(); }
-        private void StopDownload() { if (request != null) { request.Abort(); request.Dispose(); request = null; } success = null; failure = null; }
+        private void StopDownload() { if (request != null) { request.Abort(); (request.downloadHandler as DiskDownload)?.Cleanup(); request.Dispose(); request = null; } success = null; packageSuccess = null; failure = null; }
         private void Tick()
         {
             TickGallery();
             TickPreview();
             if (request != null)
             {
+                if (request.downloadHandler is DiskDownload downloading)
+                {
+                    if (downloading.IdleSeconds > 30) request.Abort();
+                    Repaint();
+                }
                 if (!request.isDone && EditorApplication.timeSinceStartup > deadline) request.Abort();
                 if (request.isDone)
                 {
-                    var current = request; var done = success; var failed = failure;
-                    request = null; success = null; failure = null;
+                    var current = request; var done = success; var packageDone = packageSuccess; var failed = failure;
+                    request = null; success = null; packageSuccess = null; failure = null;
                     try
                     {
                         if (current.result != UnityWebRequest.Result.Success || current.responseCode != 200) throw new IOException("Community file unavailable or request refused. Refresh to retry.");
-                        done(((BoundedDownload)current.downloadHandler).Bytes());
+                        if (current.downloadHandler is DiskDownload disk) packageDone(disk.Finish());
+                        else done(((BoundedDownload)current.downloadHandler).Bytes());
                     }
                     catch (Exception error) { failed(error.Message); }
-                    finally { current.Dispose(); Repaint(); }
+                    finally { (current.downloadHandler as DiskDownload)?.Cleanup(); current.Dispose(); Repaint(); }
                 }
             }
             bool importFinished = ImportReview.Active == null && ImportReview.RecoveryError == null && receipts.Values.Any(value => value.status == "review");
@@ -715,12 +780,12 @@ namespace CreatorWorks.Plugins
                 PollInbox(); Repaint();
             }
         }
-        private void Fetch(string url, long max, Action<byte[]> done, Action<string> failed)
+        private void Fetch(string url, long max, Action<byte[]> done, Action<string> failed, int seconds = 25)
         {
             if (request != null) throw new InvalidOperationException("A download is already running.");
             if (!PluginProtocol.WebUrl(url)) throw new InvalidDataException("Unapproved community URL.");
-            request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET) { downloadHandler = new BoundedDownload(max), timeout = 25, redirectLimit = 0 };
-            success = done; failure = failed; deadline = EditorApplication.timeSinceStartup + 27;
+            request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET) { downloadHandler = new BoundedDownload(max), timeout = seconds, redirectLimit = 0 };
+            success = done; failure = failed; deadline = EditorApplication.timeSinceStartup + seconds + 2;
             try { request.SendWebRequest(); }
             catch { StopDownload(); throw; }
         }
@@ -742,6 +807,18 @@ namespace CreatorWorks.Plugins
         {
             if (listingIndex >= pendingListings.Length || EditorApplication.timeSinceStartup > catalogueDeadline)
             {
+                Fetch(PluginProtocol.Root + "downloads.json", 128 * 1024, bytes =>
+                {
+                    try { PluginProtocol.ApplyDownloads(listings, bytes); }
+                    catch { warnings++; }
+                    FinishCatalogue();
+                }, error => FinishCatalogue(), 5);
+                return;
+            }
+            LoadNextListing();
+        }
+        private void FinishCatalogue()
+        {
                 catalogueFresh = listingIndex >= pendingListings.Length && warnings == 0;
                 catalogueLoadedAt = EditorApplication.timeSinceStartup;
                 listings.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.OrdinalIgnoreCase));
@@ -753,8 +830,9 @@ namespace CreatorWorks.Plugins
                     if (catalogueFresh && current != null && PluginProtocol.CanImport(current)) { selected = current; Download(current); }
                     else message = "The catalogue changed or could not be verified. No import started. Refresh and choose the contribution again.";
                 }
-                return;
-            }
+        }
+        private void LoadNextListing()
+        {
             string path = pendingListings[listingIndex++];
             try
             {
@@ -916,33 +994,42 @@ namespace CreatorWorks.Plugins
                 string cached = PluginProtocol.Area(ImportReview.Project, relative);
                 if (File.Exists(cached))
                 {
-                    PluginProtocol.Verify(PluginProtocol.ReadBounded(cached, PluginProtocol.MaxPackage), entry.download.byteLength, entry.download.sha256);
+                    PluginProtocol.VerifyFile(cached, entry.download.byteLength, entry.download.sha256);
                     OpenImport(entry, filename);
                     return;
                 }
                 message = "Downloading package and checking its checksum...";
-                Fetch(PluginProtocol.DownloadUrl(entry.download), entry.download.byteLength, bytes =>
+                var disk = new DiskDownload(entry.download.byteLength, entry.download.sha256);
+                try
                 {
-                    PluginProtocol.Verify(bytes, entry.download.byteLength, entry.download.sha256);
-                    OpenImport(entry, filename, bytes);
-                }, error => message = error);
+                    request = new UnityWebRequest(PluginProtocol.DownloadUrl(entry.download), UnityWebRequest.kHttpVerbGET) { downloadHandler = disk, timeout = 1800, redirectLimit = 0 };
+                    packageSuccess = stream => OpenQueuedImport(QueueImport(entry, filename, null, stream));
+                    failure = error => message = error;
+                    deadline = EditorApplication.timeSinceStartup + 1802;
+                    request.SendWebRequest();
+                }
+                catch { disk.Cleanup(); StopDownload(); throw; }
             }
             catch (Exception error) { message = error.Message; }
         }
         private void OpenImport(Listing entry, string filename, byte[] package = null)
         {
-            var item = QueueImport(entry, filename, package);
+            OpenQueuedImport(QueueImport(entry, filename, package));
+        }
+        private void OpenQueuedImport(ImportRequest item)
+        {
             tab = 1; PollInbox();
             if (ImportReview.Busy) { message = "Package is ready. Wait for Unity to finish, then click Import into project."; return; }
             ImportReview.Review(item);
             message = "Choose the files to add in Unity's import window."; nextPoll = 0;
         }
-        internal static ImportRequest QueueImport(Listing entry, string filename, byte[] package = null)
+        internal static ImportRequest QueueImport(Listing entry, string filename, byte[] package = null, Stream stream = null)
         {
             if (!PluginProtocol.CanImport(entry)) throw new InvalidDataException("This contribution is not available for Unity import.");
             var item = new ImportRequest { requestId = Guid.NewGuid().ToString("N"), projectPath = ImportReview.Project, packageId = entry.id, version = entry.version, name = entry.name, byteLength = entry.download.byteLength, sha256 = entry.download.sha256, packageFile = filename };
             PluginProtocol.ValidateRequest(item, ImportReview.Project);
-            PluginQueue.Enqueue(ImportReview.Project, item, package);
+            if (stream != null) PluginQueue.EnqueueStream(ImportReview.Project, item, stream);
+            else PluginQueue.Enqueue(ImportReview.Project, item, package);
             return item;
         }
         private void RetryImport(ImportRequest item)
@@ -974,6 +1061,8 @@ namespace CreatorWorks.Plugins
                 using (new EditorGUI.DisabledScope(ImportReview.EditorBusy)) if (GUILayout.Button("Clear unconfirmed import...")) ImportReview.ClearUnconfirmed();
             }
             if (request != null && GUILayout.Button("Cancel download")) CancelDownload();
+            if (request != null && request.downloadHandler is DiskDownload downloading)
+                GUILayout.Label(string.Format("{0:F1} / {1:F1} MB", request.downloadedBytes / (1024.0 * 1024), downloading.Expected / (1024.0 * 1024)), EditorStyles.miniLabel);
             scroll = EditorGUILayout.BeginScrollView(scroll);
             if (tab == 0) DrawCatalogue(); else DrawInbox();
             EditorGUILayout.EndScrollView();
@@ -1139,6 +1228,40 @@ namespace CreatorWorks.Plugins
             }
             using (new EditorGUI.DisabledScope(ImportReview.Busy || request != null || Selection.objects.Length == 0))
                 if (GUILayout.Button("Organize selected assets...")) OrganizeAssetsWindow.Open();
+        }
+        internal sealed class DiskDownload : DownloadHandlerScript
+        {
+            internal readonly long Expected;
+            internal readonly string Temporary;
+            private readonly string hash;
+            private FileStream file;
+            private bool invalid;
+            private readonly System.Diagnostics.Stopwatch idle = System.Diagnostics.Stopwatch.StartNew();
+            internal double IdleSeconds => idle.Elapsed.TotalSeconds;
+            internal DiskDownload(long length, string expectedHash) : base(new byte[64 * 1024])
+            {
+                if (length <= 0 || length > PluginProtocol.MaxPackage || !PluginProtocol.Hex(expectedHash, 64)) throw new InvalidDataException("Invalid package download.");
+                Expected = length; hash = expectedHash;
+                Temporary = Path.Combine(Path.GetTempPath(), "creator-plugin-" + Guid.NewGuid().ToString("N") + ".part");
+                file = new FileStream(Temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose);
+            }
+            protected override void ReceiveContentLengthHeader(ulong length) { invalid = length != (ulong)Expected; }
+            protected override bool ReceiveData(byte[] bytes, int count) => WriteChunk(bytes, count);
+            internal bool WriteChunk(byte[] bytes, int count)
+            {
+                if (invalid || file == null || bytes == null || count < 0 || count > bytes.Length || file.Length + count > Expected) { invalid = true; return false; }
+                try { file.Write(bytes, 0, count); idle.Restart(); return true; }
+                catch (IOException) { invalid = true; return false; }
+            }
+            internal Stream Finish()
+            {
+                if (invalid || file == null) throw new InvalidDataException("Package exceeded its size limit or could not be saved.");
+                file.Flush(true); PluginProtocol.VerifyStream(file, Expected, hash); return file;
+            }
+            internal void Cleanup()
+            {
+                if (file != null) { file.Dispose(); file = null; }
+            }
         }
         private sealed class BoundedDownload : DownloadHandlerScript
         {
