@@ -1,0 +1,9 @@
+{
+  "name": "CreatorWorks.Plugins.Editor",
+  "rootNamespace": "CreatorWorks.Plugins",
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true,
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "noEngineReferences": false
+}

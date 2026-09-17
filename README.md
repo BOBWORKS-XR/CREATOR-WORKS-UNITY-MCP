@@ -2,7 +2,11 @@
 
 Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[Windows 2.7.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.7.1) | [Release notes](docs/releases/2.7.1.md) | [Linux/macOS 2.6.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+[Windows 2.7.2](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.7.2) | [Release notes](docs/releases/2.7.2.md) | [Linux/macOS 2.6.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.6.0) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+
+**2.7.2 for Windows** fixes Add Unity menu remaining blocked by a stale unlocked
+Unity lock file. Creator Plugins gains preview galleries and streamed large
+downloads with progress and cancellation. Update Hub first for hosted use.
 
 **2.7.1 for Windows** fixes private Node processes remaining alive after an AI
 client disconnects during a pending compile wait. The installer offers an explicit
@@ -25,7 +29,7 @@ existing verified 2.6.0 installations can be upgraded without deleting settings.
 Do not uninstall or delete app data just to make an update appear. Unknown,
 duplicate and historical MSI installations may need explicit attention.
 
-Hub-managed updates to MCP 2.7.1 require Creator Hub 0.1.3 or newer. Opening MCP inside Hub
+Hub-managed updates to MCP 2.7.2 require Creator Hub 0.1.7 or newer. Opening MCP inside Hub
 asks for consent and uses MCP's existing settings. [Creator Project Setup](https://github.com/BOBWORKS-XR/CREATOR-PROJECT-SETUP/releases)
 is optional; existing MCP users do not need it to keep using their projects.
 

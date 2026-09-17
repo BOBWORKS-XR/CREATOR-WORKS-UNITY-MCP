@@ -87,8 +87,10 @@ test('queued review uses external content-addressed files and bounded transport'
   assert.match(source, /request\.packageFile != request\.sha256 \+ "\.unitypackage"/);
   assert.match(source, /request\.projectPath/);
   assert.match(source, /FileAttributes\.ReparsePoint/);
-  assert.match(source, /MaxPackage = 32 \* 1024 \* 1024/);
+  assert.match(source, /MaxPackage = 256 \* 1024 \* 1024/);
   assert.match(source, /DownloadHandlerScript/);
+  assert.match(source, /FileOptions\.DeleteOnClose/);
+  assert.match(source, /VerifyStream\(file, Expected, hash\)/);
   assert.match(source, /redirectLimit = 0/);
   assert.match(source, /File\.Move\(temporary, path\)/);
   assert.match(source, /active-review\.json/);
@@ -113,7 +115,9 @@ test('omitted Unity catalogue review state remains pending rather than download-
 
 test('Unity catalogue checks its type-aware import route before fetching or queueing bytes', () => {
   const download = section('private void Download(Listing entry)', 'private void OpenImport(');
-  assert.ok(download.indexOf('PluginProtocol.CanImport(entry)') < download.indexOf('Fetch('));
+  assert.ok(download.indexOf('PluginProtocol.CanImport(entry)') >= 0);
+  assert.ok(download.indexOf('PluginProtocol.CanImport(entry)') < download.indexOf('new DiskDownload('));
+  assert.ok(download.indexOf('PluginProtocol.CanImport(entry)') < download.indexOf('request.SendWebRequest()'));
   assert.match(source, /!PluginProtocol\.CanImport\(entry\)/);
 });
 

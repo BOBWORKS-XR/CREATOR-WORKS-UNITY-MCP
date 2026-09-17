@@ -2194,6 +2194,8 @@ fn main() {
                 community_api::community_catalogue,
                 community_api::open_community_link,
                 community_api::download_community_package,
+                community_api::community_transfer_status,
+                community_api::cancel_community_transfer,
                 community_api::community_projects,
                 community_api::choose_community_project,
                 community_api::install_community_menu,

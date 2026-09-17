@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -14,7 +14,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 const PACKAGE: &str = "Packages/com.creatorworks.plugins";
 const AREA: &str = ".creator-plugins";
 const MAX_JSON: u64 = 2 * 1024 * 1024;
-const MAX_PACKAGE: u64 = 32 * 1024 * 1024;
+const MAX_PACKAGE: u64 = crate::community::transfer::MAX_PACKAGE;
 // Exact alpha.8 helper from 4ab615c; earlier public Hub releases had no helper.
 const LEGACY_HASHES: &[&str] = &[
     "7d4cbdef640f5cc89c45a6c1fad1046586ea73fbf22e8ff68252e5a3b463843e",
@@ -28,6 +28,13 @@ const STABLE_HASHES: &[&str] = &[
     "7e1bc8fb937a3324de67fb2439b8e943dda3efc6b62684da2697e1bfcfe7414e",
     "4af0449cdb8f192a2a0ec8498db78790cf9f185e08fb9bac95c237ad7e152a5d",
     "eb62f266835bf42814c3decc224197cb74842fc316428390645d314ca28243a7",
+];
+// Exact grid helper shipped with Hub 0.1.1 through 0.1.6.
+const GRID_HASHES: &[&str] = &[
+    "b9624dfda50c815913ee4e3555c3b5abcfdfc3a557c7eaf3bcb2061dbde08faf",
+    "7e1bc8fb937a3324de67fb2439b8e943dda3efc6b62684da2697e1bfcfe7414e",
+    "4af0449cdb8f192a2a0ec8498db78790cf9f185e08fb9bac95c237ad7e152a5d",
+    "506799fb7c9a3868d212c635217ba853084e20fc6b22c772b7565fb54ac8ab07",
 ];
 const FILES: &[(&str, &[u8])] = &[
     (
@@ -185,6 +192,7 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
     let mut current = true;
     let mut legacy = true;
     let mut stable = true;
+    let mut grid = true;
     for (index, (name, expected)) in FILES.iter().enumerate() {
         let Ok(bytes) = read(&destination.join(name), 256 * 1024) else {
             return Ok("different");
@@ -193,8 +201,9 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
         let hash = digest(&bytes);
         legacy &= hash == LEGACY_HASHES[index];
         stable &= hash == STABLE_HASHES[index];
+        grid &= hash == GRID_HASHES[index];
     }
-    if !current && !legacy && !stable {
+    if !current && !legacy && !stable && !grid {
         return Ok("different");
     }
     let mut pending = vec![destination.to_path_buf()];
@@ -232,6 +241,25 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
         }
     }
     Ok(if current { "installed" } else { "outdated" })
+}
+fn editor_open(root: &Path) -> Result<bool, String> {
+    let path = root.join("Temp/UnityLockfile");
+    reject_links(&path)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Unity denies sharing while the Editor owns this file. A stale,
+        // unlocked file is not evidence of a running Editor. Never delete it.
+        match fs::OpenOptions::new().read(true).share_mode(0).open(path) {
+            Ok(_) => Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(_) => Ok(true), // Sharing/access failures remain fail-closed.
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(path.exists())
+    }
 }
 fn inspect(path: &Path) -> Result<Target, String> {
     let root = canonical(path)?;
@@ -302,7 +330,7 @@ fn inspect(path: &Path) -> Result<Target, String> {
         unity_version: unity.into(),
         sdk: sdk.into(),
         helper: helper_state(&root)?.into(),
-        open: root.join("Temp/UnityLockfile").exists(),
+        open: editor_open(&root)?,
         fingerprint,
     })
 }
@@ -879,6 +907,7 @@ fn prepare_inbox(root: &Path, package_id: &str) -> Result<(), String> {
     }
     Ok(())
 }
+#[cfg(test)]
 pub fn queue(
     target: &Target,
     package_id: &str,
@@ -887,18 +916,35 @@ pub fn queue(
     sha256: &str,
     bytes: &[u8],
 ) -> Result<Outcome, String> {
+    queue_stream(
+        target,
+        package_id,
+        version,
+        name,
+        sha256,
+        &mut std::io::Cursor::new(bytes),
+        bytes.len() as u64,
+    )
+}
+
+pub fn queue_stream(
+    target: &Target,
+    package_id: &str,
+    version: &str,
+    name: &str,
+    sha256: &str,
+    source: &mut (impl Read + Seek),
+    byte_length: u64,
+) -> Result<Outcome, String> {
     let target = fresh(target)?;
     let root = Path::new(&target.path);
     if target.helper != "installed" {
         return Err("Add the matching Unity menu to this project before sending packages.".into());
     }
-    if !hex(sha256, 64)
-        || bytes.is_empty()
-        || bytes.len() as u64 > MAX_PACKAGE
-        || digest(bytes) != sha256
-    {
+    if !hex(sha256, 64) || byte_length == 0 || byte_length > MAX_PACKAGE {
         return Err("Package checksum did not match. Nothing was queued.".into());
     }
+    crate::community::transfer::verify(source, byte_length, sha256)?;
     let _guard = operation(root)?;
     let mut random = [0u8; 16];
     getrandom::fill(&mut random).map_err(|_| "Could not create an import request identifier.")?;
@@ -910,19 +956,39 @@ pub fn queue(
         package_id: package_id.into(),
         version: version.into(),
         name: name.into(),
-        byte_length: bytes.len() as u64,
+        byte_length,
         sha256: sha256.into(),
         package_file: format!("{sha256}.unitypackage"),
     };
     validate_request(&request, root)?;
     let file = area(root, &format!("packages/{}", request.package_file))?;
-    if file.exists() && digest(&read(&file, MAX_PACKAGE)?) != sha256 {
-        return Err("The existing cached package differs. It was not overwritten.".into());
+    if file.exists() {
+        reject_links(&file)?;
+        let mut cache = fs::File::open(&file).map_err(|_| "Cannot read cached package.")?;
+        crate::community::transfer::verify(&mut cache, byte_length, sha256)
+            .map_err(|_| "The existing cached package differs. It was not overwritten.")?;
     }
     fresh(&target)?;
     prepare_inbox(root, package_id)?;
     if !file.exists() {
-        save_new(&file, bytes)?;
+        let parent = file.parent().ok_or("Invalid package cache.")?;
+        fs::create_dir_all(parent).map_err(|_| "Cannot create package cache.")?;
+        reject_links(&file)?;
+        let mut temp = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|_| "Cannot create package cache file.")?;
+        let copied = std::io::copy(&mut source.take(byte_length + 1), temp.as_file_mut())
+            .map_err(|_| "Could not cache package. Check free disk space.")?;
+        if copied != byte_length {
+            return Err("Package changed during caching.".into());
+        }
+        crate::community::transfer::verify(temp.as_file_mut(), byte_length, sha256)?;
+        temp.as_file()
+            .sync_all()
+            .map_err(|_| "Could not finish caching package.")?;
+        reject_links(&file)?;
+        temp.persist_noclobber(&file).map_err(|_| {
+            "Package cache already exists or could not be saved. Nothing was overwritten."
+        })?;
     }
     if fresh(&target)?.helper != "installed" {
         return Err("The Unity helper changed. No import request was sent.".into());
@@ -995,6 +1061,55 @@ fn status(target: &Target, request_id: &str) -> Result<Outcome, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn grid_helper_gallery_upgrade_backs_up_and_rejects_user_edits() {
+        let old: &[(&str, &[u8])] = &[
+            ("package.json", include_bytes!("../../tests/fixtures/helper-stable-0.1.6/unity/com.creatorworks.plugins/package.json")),
+            ("LICENSE.md", include_bytes!("../../tests/fixtures/helper-stable-0.1.6/unity/com.creatorworks.plugins/LICENSE.md")),
+            ("Editor/CreatorWorks.Plugins.Editor.asmdef", include_bytes!("../../tests/fixtures/helper-stable-0.1.6/unity/com.creatorworks.plugins/Editor/CreatorWorks.Plugins.Editor.asmdef")),
+            ("Editor/CreatorPluginsWindow.cs", include_bytes!("../../tests/fixtures/helper-stable-0.1.6/unity/com.creatorworks.plugins/Editor/CreatorPluginsWindow.cs")),
+        ];
+        for modified in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            project(temp.path());
+            for ((name, bytes), hash) in old.iter().zip(GRID_HASHES) {
+                assert_eq!(digest(bytes), *hash);
+                save_new(&temp.path().join(PACKAGE).join(name), bytes).unwrap();
+            }
+            if modified {
+                fs::write(
+                    temp.path()
+                        .join(PACKAGE)
+                        .join("Editor/CreatorPluginsWindow.cs"),
+                    b"user edits",
+                )
+                .unwrap();
+            }
+            let before = helper_snapshot(&temp.path().join(PACKAGE)).unwrap();
+            let target = inspect(temp.path()).unwrap();
+            assert_eq!(
+                target.helper,
+                if modified { "different" } else { "outdated" }
+            );
+            if modified {
+                assert!(install(&target).is_err());
+                assert_eq!(helper_snapshot(&temp.path().join(PACKAGE)).unwrap(), before);
+            } else {
+                install(&target).unwrap();
+                assert_eq!(helper_state(temp.path()).unwrap(), "installed");
+                let backup = fs::read_dir(area(temp.path(), "helper-backups").unwrap())
+                    .unwrap()
+                    .next()
+                    .unwrap()
+                    .unwrap()
+                    .path();
+                assert_eq!(
+                    helper_snapshot(&backup.join("com.creatorworks.plugins")).unwrap(),
+                    before
+                );
+            }
+        }
+    }
     const STABLE_FILES: &[(&str, &[u8])] = &[
         ("package.json", include_bytes!("../../tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins/package.json")),
         ("LICENSE.md", include_bytes!("../../tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins/LICENSE.md")),
@@ -1118,6 +1233,7 @@ mod tests {
         for mutation in ["code", "extra", "open"] {
             let temp = tempfile::tempdir().unwrap();
             let target = old_helper(temp.path());
+            let mut editor = None;
             match mutation {
                 "code" => fs::write(
                     temp.path()
@@ -1134,12 +1250,14 @@ mod tests {
                 _ => {
                     fs::create_dir(temp.path().join("Temp")).unwrap();
                     fs::write(temp.path().join("Temp/UnityLockfile"), "").unwrap();
+                    editor = Some(hold_editor(temp.path()));
                 }
             }
             let before = helper_snapshot(&temp.path().join(PACKAGE)).unwrap();
             assert!(install(&target).is_err());
             assert_eq!(helper_snapshot(&temp.path().join(PACKAGE)).unwrap(), before);
             assert!(!area(temp.path(), "helper-backups").unwrap().exists());
+            drop(editor);
         }
     }
     #[test]
@@ -1334,6 +1452,97 @@ mod tests {
         inspect(root).unwrap()
     }
     #[test]
+    #[ignore = "Creates a new disposable Unity fixture and queues the explicitly selected, hash-pinned 93 MB package; does not launch Unity"]
+    fn prepare_large_import_acceptance() {
+        let source = std::env::var_os("CREATOR_PLUGIN_LARGE_PACKAGE")
+            .expect("Select the verified package file");
+        let mut file = fs::File::open(source).unwrap();
+        let hash = "b9a99519a74bdbd5d75d997bed87118896c39a4d712b9ff708e63520ea4fdf94";
+        crate::community::transfer::verify(&mut file, 93_245_650, hash).unwrap();
+        let artifacts = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("artifacts");
+        fs::create_dir_all(&artifacts).unwrap();
+        let fixture = tempfile::Builder::new()
+            .prefix("plugins-large-")
+            .tempdir_in(&artifacts)
+            .unwrap();
+        let root = fixture.path();
+        project(root);
+        fs::rename(
+            root.join("Assets/Manual.unity"),
+            root.join("Assets/Manual.txt"),
+        )
+        .unwrap();
+        fs::write(root.join("Packages/manifest.json"), br#"{"dependencies":{"com.unity.render-pipelines.universal":"17.3.0","com.unity.probuilder":"6.1.2","com.unity.modules.uielements":"1.0.0"}}"#).unwrap();
+        let target = inspect(root).unwrap();
+        install(&target).unwrap();
+        save_new(
+            &root.join(".large-package-test-fixture"),
+            b"Disposable opt-in import test",
+        )
+        .unwrap();
+        let outcome = queue_stream(
+            &target,
+            "fixture.warehouse-loft",
+            "0.1.0",
+            "Warehouse Loft streaming acceptance",
+            hash,
+            &mut file,
+            93_245_650,
+        )
+        .unwrap();
+        assert_eq!(outcome.status, "queued");
+        save_new(
+            &root.join("native-queue-result.json"),
+            &serde_json::to_vec_pretty(&outcome).unwrap(),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("Assets/Editor/PluginTests")).unwrap();
+        for name in [
+            "CreatorPluginsLargeImportSmoke.cs",
+            "CreatorWorks.Plugins.Editor.Tests.asmdef",
+        ] {
+            fs::copy(
+                artifacts.parent().unwrap().join("scripts/unity").join(name),
+                root.join("Assets/Editor/PluginTests").join(name),
+            )
+            .unwrap();
+        }
+        println!("LARGE_IMPORT_FIXTURE={}", fixture.keep().display());
+    }
+    fn hold_editor(root: &Path) -> fs::File {
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.share_mode(0);
+        }
+        options.open(root.join("Temp/UnityLockfile")).unwrap()
+    }
+    #[cfg(windows)]
+    #[test]
+    fn stale_editor_lock_is_preserved_and_does_not_block_menu_installation() {
+        let temp = tempfile::tempdir().unwrap();
+        project(temp.path());
+        fs::create_dir(temp.path().join("Temp")).unwrap();
+        let lock = temp.path().join("Temp/UnityLockfile");
+        fs::write(&lock, "stale lock fixture").unwrap();
+        let held = hold_editor(temp.path());
+        assert!(inspect(temp.path()).unwrap().open);
+        drop(held);
+        let target = inspect(temp.path()).unwrap();
+        assert!(!target.open);
+        install(&target).unwrap();
+        assert_eq!(fs::read_to_string(lock).unwrap(), "stale lock fixture");
+        assert_eq!(
+            fs::read_to_string(temp.path().join("Assets/Manual.unity")).unwrap(),
+            "manually arranged scene"
+        );
+    }
+    #[test]
     fn helper_install_is_editor_only_and_preserves_existing_content() {
         let temp = tempfile::tempdir().unwrap();
         let target = project(temp.path());
@@ -1368,8 +1577,10 @@ mod tests {
         let target = project(temp.path());
         fs::create_dir(temp.path().join("Temp")).unwrap();
         fs::write(temp.path().join("Temp/UnityLockfile"), "").unwrap();
+        let held = hold_editor(temp.path());
         assert!(install(&target).is_err());
         assert!(!temp.path().join(PACKAGE).exists());
+        drop(held);
         fs::remove_file(temp.path().join("Temp/UnityLockfile")).unwrap();
         fs::write(
             temp.path().join("Packages/manifest.json"),
@@ -1711,6 +1922,7 @@ mod tests {
             let root = tempfile::tempdir().unwrap();
             let (target, staging, held) = held_helper(root.path());
             let mut held = Some(held);
+            let mut editor = None;
             let mut waits = 0;
             let error = publish_helper(&target, staging.path(), |_| {
                 waits += 1;
@@ -1720,6 +1932,7 @@ mod tests {
                         fs::create_dir_all(root.path().join("Temp")).unwrap();
                         fs::write(root.path().join("Temp/UnityLockfile"), "fixture editor")
                             .unwrap();
+                        editor = Some(hold_editor(root.path()));
                     }
                     "manifest" => fs::write(
                         root.path().join("Packages/manifest.json"),

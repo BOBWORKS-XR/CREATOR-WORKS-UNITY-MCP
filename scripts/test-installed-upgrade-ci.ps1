@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$Installer,
-    [ValidateSet('2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2', '2.7.0')][string]$BaselineVersion = '2.6.0',
+    [ValidateSet('2.6.0', '2.7.0-alpha.1', '2.7.0-alpha.2', '2.7.0', '2.7.1')][string]$BaselineVersion = '2.6.0',
     [string]$BaselineInstaller,
     [string]$ExpectedSourceCommit = $env:GITHUB_SHA,
     [string]$ExpectedInstallerSha256,
@@ -17,7 +17,7 @@ $candidate = (Resolve-Path -LiteralPath $Installer).Path
 $candidateRoot = [IO.Path]::GetFullPath((Join-Path $repo 'launcher\src-tauri\target\release\bundle\nsis')) + '\'
 if (-not $candidate.StartsWith($candidateRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Candidate must be built in this checkout.' }
 $version = (Get-Content -LiteralPath (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json).version
-if ($version -ne '2.7.1') { throw 'Review this version-specific acceptance fixture before using another release.' }
+if ($version -ne '2.7.2') { throw 'Review this version-specific acceptance fixture before using another release.' }
 $installRoot = Join-Path $env:LOCALAPPDATA 'Creator Works MCP'
 $configRoot = Join-Path $env:APPDATA 'creator-works-mcp'
 $productKey = 'HKCU:\Software\Creator Works\Creator Works MCP'
@@ -123,6 +123,11 @@ try {
     Require ($buildInputs.runtimeStopSha256 -cmatch '^[a-f0-9]{64}$') 'Missing build binding for the packaged runtime cleanup.'
     Require ((Hash $runtimeStop) -ceq $buildInputs.runtimeStopSha256) 'Packaged runtime cleanup differs from the reviewed source.'
     $baselines = @{
+        '2.7.1' = @{
+            asset = 'Creator.Works.MCP_2.7.1_x64-setup.exe'
+            installerSha256 = '4782b6ab04e09a8d24c5fd67d8c75fde8b508d09c04cb1391d953cd51d3aaa66'
+            executableSha256 = '6e1ba9d8d4eee99b35b60c9093efd1b3c19183d2cc184266a0696b8a57b0376d'
+        }
         '2.7.0' = @{
             asset = 'Creator.Works.MCP_2.7.0_x64-setup.exe'
             installerSha256 = 'f403da14237a16d3e7a50620d484c60c0a3fbdbb6abfe1ccaf21e4ffb78e1da9'

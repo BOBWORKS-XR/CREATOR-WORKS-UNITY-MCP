@@ -18,11 +18,6 @@ namespace CreatorWorks.Plugins
     [Serializable] internal sealed class Author { public string name, url, discord; }
     [Serializable] internal sealed class Compatibility { public string[] unity, creatorSdk, banterSdk; }
     [Serializable] internal sealed class PackageDownload { public string url, path, sha256; public long byteLength; }
-    [Serializable] internal sealed class SupplementalDownload { public string id, version; public PackageDownload download; }
-    [Serializable] internal sealed class DownloadIndex { public int schemaVersion; public SupplementalDownload[] downloads; }
-    [Serializable] internal sealed class PreviewMedia { public string type, url, poster; }
-    [Serializable] internal sealed class Gallery { public string id; public PreviewMedia[] items; }
-    [Serializable] internal sealed class MediaIndex { public int schemaVersion; public Gallery[] galleries; }
     [Serializable] internal sealed class Listing
     {
         public int schemaVersion;
@@ -51,7 +46,7 @@ namespace CreatorWorks.Plugins
     {
         internal const string Root = "https://raw.githubusercontent.com/SideQuestVR/Creator-Community/main/";
         internal const string Repository = "https://github.com/SideQuestVR/Creator-Community";
-        internal const long MaxPackage = 256 * 1024 * 1024;
+        internal const long MaxPackage = 32 * 1024 * 1024;
         internal static bool Hex(string value, int length) => value != null && value.Length == length && value.All(c => c >= '0' && c <= '9' || c >= 'a' && c <= 'f');
         internal static bool Text(string value, int max) => !string.IsNullOrWhiteSpace(value) && value.Length <= max && !value.Any(c => char.IsControl(c) && c != '\n' && c != '\t');
         internal static string ReceiptMessage(string value)
@@ -77,45 +72,6 @@ namespace CreatorWorks.Plugins
             if (uri.Host == "cdn.sidequestvr.com") return uri.AbsolutePath.StartsWith("/file/", StringComparison.Ordinal);
             if (uri.Host == "raw.githubusercontent.com") return uri.AbsolutePath.StartsWith("/SideQuestVR/Creator-Community/main/", StringComparison.Ordinal);
             return !media && (uri.Host == "github.com" || uri.Host == "discord.com") && uri.AbsolutePath != "/";
-        }
-        private static bool PreviewUrl(string value, params string[] extensions) =>
-            (RepositoryPath(value) || WebUrl(value, true)) && extensions.Any(e => value.EndsWith(e, StringComparison.Ordinal));
-        internal static Gallery[] ParseMedia(byte[] bytes)
-        {
-            if (bytes.Length > 256 * 1024) throw new InvalidDataException("Preview gallery exceeds its size limit.");
-            var index = JsonUtility.FromJson<MediaIndex>(Encoding.UTF8.GetString(bytes));
-            if (index == null || index.schemaVersion != 1 || index.galleries == null || index.galleries.Length > 50) throw new InvalidDataException("Invalid preview gallery.");
-            var ids = new HashSet<string>();
-            foreach (var gallery in index.galleries)
-            {
-                if (gallery == null || !Text(gallery.id, 100) || !ids.Add(gallery.id) || gallery.items == null || gallery.items.Length < 1 || gallery.items.Length > 8) throw new InvalidDataException("Invalid preview gallery entries.");
-                foreach (var item in gallery.items)
-                {
-                    if (item == null) throw new InvalidDataException("Invalid preview media.");
-                    bool valid = item.type == "image" ? PreviewUrl(item.url, ".png", ".jpg", ".jpeg") && item.poster == null :
-                        (item.type == "gif" || item.type == "webm") && PreviewUrl(item.url, "." + item.type) && PreviewUrl(item.poster, ".png", ".jpg", ".jpeg");
-                    if (!valid) throw new InvalidDataException("Unapproved preview media or missing static poster.");
-                }
-            }
-            return index.galleries;
-        }
-        internal static string StaticPreview(PreviewMedia item) => item.type == "image" ? item.url : item.poster;
-        internal static void ApplyDownloads(List<Listing> entries, byte[] bytes)
-        {
-            if (bytes.Length > 128 * 1024) throw new InvalidDataException("Download index exceeds its size limit.");
-            var index = JsonUtility.FromJson<DownloadIndex>(Encoding.UTF8.GetString(bytes));
-            if (index == null || index.schemaVersion != 1 || index.downloads == null || index.downloads.Length > 50) throw new InvalidDataException("Invalid download index.");
-            var ids = new HashSet<string>();
-            foreach (var item in index.downloads)
-            {
-                if (item == null || !Id(item.id) || !Version(item.version) || !ids.Add(item.id)) throw new InvalidDataException("Invalid download identity.");
-                DownloadUrl(item.download);
-            }
-            foreach (var item in index.downloads)
-            {
-                var entry = entries.FirstOrDefault(e => e.id == item.id && e.version == item.version && e.download == null && e.reviewStatus == "listed");
-                if (entry != null) entry.download = item.download;
-            }
         }
         internal static string DownloadUrl(PackageDownload download)
         {
@@ -185,42 +141,7 @@ namespace CreatorWorks.Plugins
         }
         internal static void Verify(byte[] bytes, long length, string hash)
         {
-            using (var stream = new MemoryStream(bytes, false)) VerifyStream(stream, length, hash);
-        }
-        internal static void VerifyStream(Stream stream, long length, string hash)
-        {
-            if (length <= 0 || length > MaxPackage || stream.Length != length) throw new InvalidDataException("Package size did not match. Nothing imported.");
-            stream.Position = 0;
-            if (Hash(stream) != hash) throw new InvalidDataException("Package checksum did not match. Nothing imported.");
-            stream.Position = 0;
-        }
-        internal static void VerifyFile(string path, long length, string hash)
-        {
-            using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)) VerifyStream(file, length, hash);
-        }
-        internal static void SavePackage(string project, string relative, Stream source, long length, string hash)
-        {
-            VerifyStream(source, length, hash);
-            string path = Area(project, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
-            Area(project, relative);
-            string temporary = Area(project, Path.Combine(Path.GetDirectoryName(relative), ".tmp-" + Guid.NewGuid().ToString("N")));
-            try
-            {
-                using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
-                {
-                    var buffer = new byte[64 * 1024]; long copied = 0; int count;
-                    while ((count = source.Read(buffer, 0, buffer.Length)) != 0)
-                    {
-                        copied += count;
-                        if (copied > length) throw new InvalidDataException("Package changed during caching.");
-                        file.Write(buffer, 0, count);
-                    }
-                    VerifyStream(file, length, hash); file.Flush(true);
-                }
-                Area(project, relative); File.Move(temporary, path);
-            }
-            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            using (var stream = new MemoryStream(bytes, false)) if (bytes.LongLength != length || Hash(stream) != hash) throw new InvalidDataException("Package size or checksum did not match. Nothing imported.");
         }
         internal static FileStream LockPackage(ImportRequest request, string project)
         {
@@ -555,12 +476,8 @@ namespace CreatorWorks.Plugins
         }
         internal static void Enqueue(string project, ImportRequest request, byte[] package = null)
         {
-            using (var stream = package == null ? null : new MemoryStream(package, false)) EnqueueStream(project, request, stream);
-        }
-        internal static void EnqueueStream(string project, ImportRequest request, Stream package)
-        {
             PluginProtocol.ValidateRequest(request, project);
-            if (package != null) PluginProtocol.VerifyStream(package, request.byteLength, request.sha256);
+            if (package != null) PluginProtocol.Verify(package, request.byteLength, request.sha256);
             byte[] requestBytes = Encoding.UTF8.GetBytes(JsonUtility.ToJson(request));
             if (requestBytes.Length > 16 * 1024) throw new InvalidDataException("Import request exceeds its metadata limit.");
             using (new PluginQueueLock(project))
@@ -574,7 +491,7 @@ namespace CreatorWorks.Plugins
                 foreach (string relative in new[] { "inbox/", "history/requests/", "receipts/" })
                     if (Exists(PluginProtocol.Area(project, relative + request.requestId + ".json"))) throw new InvalidDataException("Import request identifier already exists. Nothing was overwritten.");
                 string cache = PluginProtocol.Area(project, "packages/" + request.packageFile);
-                if (Exists(cache)) PluginProtocol.VerifyFile(cache, request.byteLength, request.sha256);
+                if (Exists(cache)) PluginProtocol.Verify(PluginProtocol.ReadBounded(cache, PluginProtocol.MaxPackage), request.byteLength, request.sha256);
                 else if (package == null) throw new InvalidDataException("The checked package is missing. Nothing was queued.");
                 foreach (var item in items.Where(value => value.finalBytes != null))
                 {
@@ -588,7 +505,7 @@ namespace CreatorWorks.Plugins
                     if (!PluginProtocol.ReadBounded(destination, 16 * 1024).SequenceEqual(item.bytes))
                         throw new InvalidDataException("Plugin request changed during archival. Inspect its preserved history before continuing.");
                 }
-                if (!Exists(cache)) PluginProtocol.SavePackage(project, "packages/" + request.packageFile, package, request.byteLength, request.sha256);
+                if (!Exists(cache)) PluginProtocol.SaveNew(project, "packages/" + request.packageFile, package);
                 PluginProtocol.SaveNew(project, "inbox/" + request.requestId + ".json", requestBytes);
             }
         }
@@ -724,15 +641,11 @@ namespace CreatorWorks.Plugins
         private Vector2 scroll;
         private readonly Dictionary<string, Texture2D> previews = new Dictionary<string, Texture2D>();
         private readonly HashSet<string> previewAttempts = new HashSet<string>();
-        private readonly Dictionary<string, PreviewMedia[]> galleries = new Dictionary<string, PreviewMedia[]>();
-        private readonly Dictionary<string, int> galleryPositions = new Dictionary<string, int>();
-        private UnityWebRequest galleryRequest;
         private UnityWebRequest previewRequest;
         private string previewKey;
         private double previewDeadline;
         private UnityWebRequest request;
         private Action<byte[]> success;
-        private Action<Stream> packageSuccess;
         private Action<string> failure;
         private double deadline, catalogueDeadline, catalogueLoadedAt, nextPoll;
         private bool catalogueFresh;
@@ -746,31 +659,24 @@ namespace CreatorWorks.Plugins
         private void OnEnable() { gridView = EditorPrefs.GetString(LayoutPreference, "grid") != "list"; EditorApplication.update += Tick; EditorApplication.delayCall += LoadWhenOpened; nextPoll = 0; }
         private void OnDisable() { EditorApplication.update -= Tick; EditorApplication.delayCall -= LoadWhenOpened; StopDownload(); ClearPreviews(); }
         private void LoadWhenOpened() { if (this != null && listings.Count == 0 && request == null && !ImportReview.Busy) RefreshCatalogue(); }
-        private void StopDownload() { if (request != null) { request.Abort(); (request.downloadHandler as DiskDownload)?.Cleanup(); request.Dispose(); request = null; } success = null; packageSuccess = null; failure = null; }
+        private void StopDownload() { if (request != null) { request.Abort(); request.Dispose(); request = null; } success = null; failure = null; }
         private void Tick()
         {
-            TickGallery();
             TickPreview();
             if (request != null)
             {
-                if (request.downloadHandler is DiskDownload downloading)
-                {
-                    if (downloading.IdleSeconds > 30) request.Abort();
-                    Repaint();
-                }
                 if (!request.isDone && EditorApplication.timeSinceStartup > deadline) request.Abort();
                 if (request.isDone)
                 {
-                    var current = request; var done = success; var packageDone = packageSuccess; var failed = failure;
-                    request = null; success = null; packageSuccess = null; failure = null;
+                    var current = request; var done = success; var failed = failure;
+                    request = null; success = null; failure = null;
                     try
                     {
                         if (current.result != UnityWebRequest.Result.Success || current.responseCode != 200) throw new IOException("Community file unavailable or request refused. Refresh to retry.");
-                        if (current.downloadHandler is DiskDownload disk) packageDone(disk.Finish());
-                        else done(((BoundedDownload)current.downloadHandler).Bytes());
+                        done(((BoundedDownload)current.downloadHandler).Bytes());
                     }
                     catch (Exception error) { failed(error.Message); }
-                    finally { (current.downloadHandler as DiskDownload)?.Cleanup(); current.Dispose(); Repaint(); }
+                    finally { current.Dispose(); Repaint(); }
                 }
             }
             bool importFinished = ImportReview.Active == null && ImportReview.RecoveryError == null && receipts.Values.Any(value => value.status == "review");
@@ -780,12 +686,12 @@ namespace CreatorWorks.Plugins
                 PollInbox(); Repaint();
             }
         }
-        private void Fetch(string url, long max, Action<byte[]> done, Action<string> failed, int seconds = 25)
+        private void Fetch(string url, long max, Action<byte[]> done, Action<string> failed)
         {
             if (request != null) throw new InvalidOperationException("A download is already running.");
             if (!PluginProtocol.WebUrl(url)) throw new InvalidDataException("Unapproved community URL.");
-            request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET) { downloadHandler = new BoundedDownload(max), timeout = seconds, redirectLimit = 0 };
-            success = done; failure = failed; deadline = EditorApplication.timeSinceStartup + seconds + 2;
+            request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET) { downloadHandler = new BoundedDownload(max), timeout = 25, redirectLimit = 0 };
+            success = done; failure = failed; deadline = EditorApplication.timeSinceStartup + 27;
             try { request.SendWebRequest(); }
             catch { StopDownload(); throw; }
         }
@@ -793,9 +699,6 @@ namespace CreatorWorks.Plugins
         {
             if (request != null || ImportReview.Busy) return;
             catalogueFresh = false; message = "Loading catalogue..."; listings.Clear(); selected = null; ClearPreviews(); warnings = 0;
-            galleryRequest = new UnityWebRequest(PluginProtocol.Root + "media.json", UnityWebRequest.kHttpVerbGET) { downloadHandler = new BoundedDownload(256 * 1024), timeout = 5, redirectLimit = 0 };
-            try { galleryRequest.SendWebRequest(); }
-            catch { galleryRequest.Dispose(); galleryRequest = null; }
             Fetch(PluginProtocol.Root + "index.json", 32 * 1024, bytes =>
             {
                 var index = JsonUtility.FromJson<CatalogueIndex>(Encoding.UTF8.GetString(bytes));
@@ -807,18 +710,6 @@ namespace CreatorWorks.Plugins
         {
             if (listingIndex >= pendingListings.Length || EditorApplication.timeSinceStartup > catalogueDeadline)
             {
-                Fetch(PluginProtocol.Root + "downloads.json", 128 * 1024, bytes =>
-                {
-                    try { PluginProtocol.ApplyDownloads(listings, bytes); }
-                    catch { warnings++; }
-                    FinishCatalogue();
-                }, error => FinishCatalogue(), 5);
-                return;
-            }
-            LoadNextListing();
-        }
-        private void FinishCatalogue()
-        {
                 catalogueFresh = listingIndex >= pendingListings.Length && warnings == 0;
                 catalogueLoadedAt = EditorApplication.timeSinceStartup;
                 listings.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.OrdinalIgnoreCase));
@@ -830,9 +721,8 @@ namespace CreatorWorks.Plugins
                     if (catalogueFresh && current != null && PluginProtocol.CanImport(current)) { selected = current; Download(current); }
                     else message = "The catalogue changed or could not be verified. No import started. Refresh and choose the contribution again.";
                 }
-        }
-        private void LoadNextListing()
-        {
+                return;
+            }
             string path = pendingListings[listingIndex++];
             try
             {
@@ -887,40 +777,17 @@ namespace CreatorWorks.Plugins
         }
         private void ClearPreviews()
         {
-            if (galleryRequest != null) { galleryRequest.Abort(); galleryRequest.Dispose(); galleryRequest = null; }
-            galleries.Clear(); galleryPositions.Clear();
             if (previewRequest != null) { previewRequest.Abort(); previewRequest.Dispose(); previewRequest = null; }
             foreach (var texture in previews.Values) if (texture != null) DestroyImmediate(texture);
             previews.Clear(); previewAttempts.Clear(); previewKey = null;
         }
         private void RequestPreview(Listing entry)
         {
-            RequestImage(entry.previewImage);
-        }
-        private void TickGallery()
-        {
-            if (galleryRequest == null || !galleryRequest.isDone) return;
-            try
-            {
-                if (galleryRequest.result != UnityWebRequest.Result.Success || galleryRequest.responseCode != 200) return;
-                foreach (var gallery in PluginProtocol.ParseMedia(((BoundedDownload)galleryRequest.downloadHandler).Bytes())) galleries.Add(gallery.id, gallery.items);
-            }
-            catch { galleries.Clear(); /* Optional media failure cannot disable imports. */ }
-            finally { galleryRequest.Dispose(); galleryRequest = null; Repaint(); }
-        }
-        internal PreviewMedia[] GalleryItems(Listing entry)
-        {
-            var items = galleries.TryGetValue(entry.id, out var value) ? value : Array.Empty<PreviewMedia>();
-            if (!string.IsNullOrEmpty(entry.previewImage) && !items.Any(item => item.url == entry.previewImage))
-                return new[] { new PreviewMedia { type = "image", url = entry.previewImage } }.Concat(items).ToArray();
-            return items;
-        }
-        private void RequestImage(string key)
-        {
+            string key = entry.previewImage;
             if (string.IsNullOrEmpty(key) || previewRequest != null || previewAttempts.Contains(key)) return;
             previewAttempts.Add(key);
             string url = PluginProtocol.RepositoryPath(key) ? PluginProtocol.RepositoryUrl(key) : key;
-            if (!PluginProtocol.WebUrl(url, true)) return;
+            if (!PluginProtocol.WebUrl(url)) return;
             previewRequest = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET) { downloadHandler = new BoundedDownload(2 * 1024 * 1024), timeout = 25, redirectLimit = 0 };
             previewKey = key; previewDeadline = EditorApplication.timeSinceStartup + 27;
             try { previewRequest.SendWebRequest(); }
@@ -939,16 +806,11 @@ namespace CreatorWorks.Plugins
                 if (!PluginProtocol.ImageDimensions(bytes)) throw new InvalidDataException("Preview dimensions or format are unsupported.");
                 texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave };
                 if (!texture.LoadImage(bytes, true)) throw new InvalidDataException("Preview unavailable.");
-                // Keep a bounded cache even when users browse every image in every gallery.
+                // At most 50 listings, each retaining only a 320px thumbnail, never full-size images.
                 if (texture.width > 320 || texture.height > 320)
                 {
                     Texture2D thumbnail = MakeThumbnail(texture);
                     DestroyImmediate(texture); texture = thumbnail;
-                }
-                if (previews.Count >= 50)
-                {
-                    string oldest = previews.Keys.First(); DestroyImmediate(previews[oldest]);
-                    previews.Remove(oldest); previewAttempts.Remove(oldest);
                 }
                 previews[previewKey] = texture; texture = null;
             }
@@ -994,42 +856,33 @@ namespace CreatorWorks.Plugins
                 string cached = PluginProtocol.Area(ImportReview.Project, relative);
                 if (File.Exists(cached))
                 {
-                    PluginProtocol.VerifyFile(cached, entry.download.byteLength, entry.download.sha256);
+                    PluginProtocol.Verify(PluginProtocol.ReadBounded(cached, PluginProtocol.MaxPackage), entry.download.byteLength, entry.download.sha256);
                     OpenImport(entry, filename);
                     return;
                 }
                 message = "Downloading package and checking its checksum...";
-                var disk = new DiskDownload(entry.download.byteLength, entry.download.sha256);
-                try
+                Fetch(PluginProtocol.DownloadUrl(entry.download), entry.download.byteLength, bytes =>
                 {
-                    request = new UnityWebRequest(PluginProtocol.DownloadUrl(entry.download), UnityWebRequest.kHttpVerbGET) { downloadHandler = disk, timeout = 1800, redirectLimit = 0 };
-                    packageSuccess = stream => OpenQueuedImport(QueueImport(entry, filename, null, stream));
-                    failure = error => message = error;
-                    deadline = EditorApplication.timeSinceStartup + 1802;
-                    request.SendWebRequest();
-                }
-                catch { disk.Cleanup(); StopDownload(); throw; }
+                    PluginProtocol.Verify(bytes, entry.download.byteLength, entry.download.sha256);
+                    OpenImport(entry, filename, bytes);
+                }, error => message = error);
             }
             catch (Exception error) { message = error.Message; }
         }
         private void OpenImport(Listing entry, string filename, byte[] package = null)
         {
-            OpenQueuedImport(QueueImport(entry, filename, package));
-        }
-        private void OpenQueuedImport(ImportRequest item)
-        {
+            var item = QueueImport(entry, filename, package);
             tab = 1; PollInbox();
             if (ImportReview.Busy) { message = "Package is ready. Wait for Unity to finish, then click Import into project."; return; }
             ImportReview.Review(item);
             message = "Choose the files to add in Unity's import window."; nextPoll = 0;
         }
-        internal static ImportRequest QueueImport(Listing entry, string filename, byte[] package = null, Stream stream = null)
+        internal static ImportRequest QueueImport(Listing entry, string filename, byte[] package = null)
         {
             if (!PluginProtocol.CanImport(entry)) throw new InvalidDataException("This contribution is not available for Unity import.");
             var item = new ImportRequest { requestId = Guid.NewGuid().ToString("N"), projectPath = ImportReview.Project, packageId = entry.id, version = entry.version, name = entry.name, byteLength = entry.download.byteLength, sha256 = entry.download.sha256, packageFile = filename };
             PluginProtocol.ValidateRequest(item, ImportReview.Project);
-            if (stream != null) PluginQueue.EnqueueStream(ImportReview.Project, item, stream);
-            else PluginQueue.Enqueue(ImportReview.Project, item, package);
+            PluginQueue.Enqueue(ImportReview.Project, item, package);
             return item;
         }
         private void RetryImport(ImportRequest item)
@@ -1061,8 +914,6 @@ namespace CreatorWorks.Plugins
                 using (new EditorGUI.DisabledScope(ImportReview.EditorBusy)) if (GUILayout.Button("Clear unconfirmed import...")) ImportReview.ClearUnconfirmed();
             }
             if (request != null && GUILayout.Button("Cancel download")) CancelDownload();
-            if (request != null && request.downloadHandler is DiskDownload downloading)
-                GUILayout.Label(string.Format("{0:F1} / {1:F1} MB", request.downloadedBytes / (1024.0 * 1024), downloading.Expected / (1024.0 * 1024)), EditorStyles.miniLabel);
             scroll = EditorGUILayout.BeginScrollView(scroll);
             if (tab == 0) DrawCatalogue(); else DrawInbox();
             EditorGUILayout.EndScrollView();
@@ -1158,29 +1009,15 @@ namespace CreatorWorks.Plugins
         }
         private void DrawCardPreview(Listing entry, Rect rect)
         {
-            var items = GalleryItems(entry);
-            int index = galleryPositions.TryGetValue(entry.id, out var saved) && saved < items.Length ? saved : 0;
-            string key = items.Length == 0 ? null : PluginProtocol.StaticPreview(items[index]);
-            bool animated = items.Length > 0 && items[index].type != "image";
-            if (items.Length > 1 || animated)
-            {
-                var controls = new Rect(rect.x, rect.yMax - 22, rect.width, 22);
-                rect.height -= 24;
-                if (items.Length > 1)
-                {
-                    if (GUI.Button(new Rect(controls.x, controls.y, 24, 20), new GUIContent("<", "Previous preview"))) galleryPositions[entry.id] = (index + items.Length - 1) % items.Length;
-                    if (GUI.Button(new Rect(controls.xMax - 24, controls.y, 24, 20), new GUIContent(">", "Next preview"))) galleryPositions[entry.id] = (index + 1) % items.Length;
-                }
-                GUI.Label(new Rect(controls.x + 24, controls.y, controls.width - 48, 20), (index + 1) + "/" + items.Length + (animated ? " Poster" : ""), previewLabel);
-            }
             if (Event.current.type != EventType.Repaint) return;
             EditorGUI.DrawRect(rect, EditorGUIUtility.isProSkin ? new Color(.09f, .10f, .11f) : new Color(.72f, .73f, .74f));
+            string key = entry.previewImage;
             if (!string.IsNullOrEmpty(key) && previews.TryGetValue(key, out var texture)) GUI.DrawTexture(rect, texture, ScaleMode.ScaleToFit);
             else
             {
                 bool attempted = !string.IsNullOrEmpty(key) && previewAttempts.Contains(key);
                 GUI.Label(rect, string.IsNullOrEmpty(key) ? "No preview" : attempted && key != previewKey ? "Preview unavailable" : "Loading preview...", previewLabel);
-                if (rect.yMax >= scroll.y && rect.yMin <= scroll.y + position.height) RequestImage(key);
+                if (rect.yMax >= scroll.y && rect.yMin <= scroll.y + position.height) RequestPreview(entry);
             }
         }
         private void DrawDetails()
@@ -1228,40 +1065,6 @@ namespace CreatorWorks.Plugins
             }
             using (new EditorGUI.DisabledScope(ImportReview.Busy || request != null || Selection.objects.Length == 0))
                 if (GUILayout.Button("Organize selected assets...")) OrganizeAssetsWindow.Open();
-        }
-        internal sealed class DiskDownload : DownloadHandlerScript
-        {
-            internal readonly long Expected;
-            internal readonly string Temporary;
-            private readonly string hash;
-            private FileStream file;
-            private bool invalid;
-            private readonly System.Diagnostics.Stopwatch idle = System.Diagnostics.Stopwatch.StartNew();
-            internal double IdleSeconds => idle.Elapsed.TotalSeconds;
-            internal DiskDownload(long length, string expectedHash) : base(new byte[64 * 1024])
-            {
-                if (length <= 0 || length > PluginProtocol.MaxPackage || !PluginProtocol.Hex(expectedHash, 64)) throw new InvalidDataException("Invalid package download.");
-                Expected = length; hash = expectedHash;
-                Temporary = Path.Combine(Path.GetTempPath(), "creator-plugin-" + Guid.NewGuid().ToString("N") + ".part");
-                file = new FileStream(Temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose);
-            }
-            protected override void ReceiveContentLengthHeader(ulong length) { invalid = length != (ulong)Expected; }
-            protected override bool ReceiveData(byte[] bytes, int count) => WriteChunk(bytes, count);
-            internal bool WriteChunk(byte[] bytes, int count)
-            {
-                if (invalid || file == null || bytes == null || count < 0 || count > bytes.Length || file.Length + count > Expected) { invalid = true; return false; }
-                try { file.Write(bytes, 0, count); idle.Restart(); return true; }
-                catch (IOException) { invalid = true; return false; }
-            }
-            internal Stream Finish()
-            {
-                if (invalid || file == null) throw new InvalidDataException("Package exceeded its size limit or could not be saved.");
-                file.Flush(true); PluginProtocol.VerifyStream(file, Expected, hash); return file;
-            }
-            internal void Cleanup()
-            {
-                if (file != null) { file.Dispose(); file = null; }
-            }
         }
         private sealed class BoundedDownload : DownloadHandlerScript
         {

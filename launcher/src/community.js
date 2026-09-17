@@ -56,7 +56,32 @@
   root.replaceChildren(heading, toolbar, filters, summary, message, list, footer);
   const zoom = el('dialog', 'community-zoom'); zoom.setAttribute('aria-label', 'Contribution preview');
   const closeZoom = button('Close preview', 'community-secondary', () => zoom.close());
-  const zoomImage = el('img'); zoom.append(closeZoom, zoomImage); root.append(zoom);
+  const zoomTitle = el('h3');
+  const zoomStage = el('div', 'community-media-stage');
+  const zoomStatus = el('p', 'community-media-status'); zoomStatus.setAttribute('role', 'status');
+  const previousMedia = button('', 'community-icon-button', () => selectMedia(mediaIndex - 1), 'chevron-left');
+  previousMedia.title = 'Previous preview'; previousMedia.setAttribute('aria-label', 'Previous preview');
+  const nextMedia = button('', 'community-icon-button', () => selectMedia(mediaIndex + 1), 'chevron-right');
+  nextMedia.title = 'Next preview'; nextMedia.setAttribute('aria-label', 'Next preview');
+  const mediaCount = el('span', 'community-media-count');
+  const mediaAction = button('Load animation', 'community-secondary', () => {}, 'play');
+  const mediaRetry = button('Retry preview', 'community-secondary', () => showMedia(false), 'refresh'); mediaRetry.hidden = true;
+  const mediaControls = el('div', 'community-media-controls');
+  mediaControls.append(previousMedia, mediaCount, nextMedia, mediaAction, mediaRetry);
+  const zoomHeader = el('div', 'community-media-header'); zoomHeader.append(zoomTitle, closeZoom);
+  zoom.append(zoomHeader, zoomStage, zoomStatus, mediaControls); root.append(zoom);
+  let mediaItems = [], mediaIndex = 0, mediaName = '', mediaAbort = null, mediaBlob = null;
+  function clearMedia() {
+    mediaAbort?.abort(); mediaAbort = null;
+    const video = zoomStage.querySelector('video'); if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
+    zoomStage.replaceChildren();
+    if (mediaBlob) { URL.revokeObjectURL(mediaBlob); mediaBlob = null; }
+  }
+  zoom.addEventListener('close', clearMedia);
+  zoom.addEventListener('keydown', event => {
+    if (event.target.tagName === 'VIDEO') return;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); selectMedia(mediaIndex + (event.key === 'ArrowLeft' ? -1 : 1)); }
+  });
   zoom.addEventListener('click', e => { if (e.target === zoom) zoom.close(); });
   let projectBusy = false, projectError = false, projectEntries = [], importEntry = null, outcome = null;
   const projectDialog = el('dialog', 'community-project-dialog'); projectDialog.setAttribute('aria-labelledby', 'community-project-title');
@@ -78,7 +103,7 @@
     await refreshTargets();
   }, 'Preparing the Unity menu... Please wait.'), 'plugins');
   const sendAction = button('Send to Unity for review', 'community-primary', () => projectAction(async () => {
-    outcome = await invoke('queue_community_import', { id: importEntry.id, projectId: projectSelect.value });
+    outcome = await runTransfer('queue_community_import', { id: importEntry.id, projectId: projectSelect.value }, true);
     showOutcome();
   }, 'Preparing the package for Unity review... Please wait.'), 'download');
   const checkAction = button('Check Unity status', 'community-secondary', () => projectAction(async () => {
@@ -87,7 +112,45 @@
   const closeProject = button('Close', 'community-secondary', () => projectDialog.close());
   const projectActions = el('div', 'community-project-actions'); projectActions.append(menuAction, sendAction, checkAction, closeProject);
   projectDialog.append(projectTitle, el('p', 'community-project-info', 'Experimental project integration'), projectLoading, projectLabel, projectPicker, projectPath, projectInfo, projectSafety, projectMessage, projectActions); root.append(projectDialog);
+  const transferPanel = el('div', 'community-transfer'); transferPanel.hidden = true;
+  const transferText = el('span'); transferText.setAttribute('role', 'status');
+  const cancelTransfer = button('Cancel download', 'community-secondary', async () => {
+    if (!activeTransfer) return;
+    const id = activeTransfer;
+    cancelTransfer.disabled = true;
+    try { await invoke('cancel_community_transfer', { operationId: id }); if (activeTransfer === id) transferText.textContent = 'Cancelling download...'; }
+    catch (error) { if (activeTransfer === id) { transferText.textContent = String(error); cancelTransfer.disabled = false; } }
+  }, 'close');
+  transferPanel.append(transferText, cancelTransfer);
+  let activeTransfer = null;
+  async function runTransfer(command, args, inProject = false) {
+    const operationId = crypto.randomUUID(); activeTransfer = operationId;
+    let timer;
+    const started = performance.now();
+    (inProject ? projectDialog : root).append(transferPanel);
+    transferPanel.hidden = false; cancelTransfer.hidden = true; cancelTransfer.disabled = false;
+    transferText.textContent = 'Preparing download...';
+    const poll = async () => {
+      try {
+        const progress = await invoke('community_transfer_status');
+        if (activeTransfer !== operationId) return;
+        if (progress?.id === operationId) {
+          const speed = progress.received / Math.max(1, (performance.now() - started) / 1000);
+          const phase = { downloading: 'Downloading', checking: 'Checking package', review: 'Waiting for approval', queueing: 'Sending to Unity', saving: 'Saving package' }[progress.phase] || 'Working';
+          transferText.textContent = `${phase}: ${bytes(progress.received)} / ${bytes(progress.total)}${progress.phase === 'downloading' ? ` (${bytes(speed)}/s)` : ''}`;
+          cancelTransfer.hidden = progress.cancellable !== true;
+        }
+      } catch { /* The operation result remains authoritative if progress cannot be read. */ }
+      if (activeTransfer === operationId) timer = setTimeout(poll, 250);
+    };
+    timer = setTimeout(poll, 100);
+    try { return await invoke(command, { ...args, operationId }); }
+    finally { activeTransfer = null; clearTimeout(timer); transferPanel.hidden = true; }
+  }
   projectDialog.addEventListener('cancel', event => { if (projectBusy) event.preventDefault(); });
+  window.addEventListener('focus', () => {
+    if (projectDialog.open && !busy && !projectBusy) void projectAction(refreshTargets, 'Rechecking Unity projects...');
+  });
   projectSelect.addEventListener('change', () => { outcome = null; projectMessage.textContent = ''; renderProject(); });
   function fillProjects(selectedId = projectSelect.value) {
     const first = el('option', '', 'Choose a Unity project'); first.value = '';
@@ -152,6 +215,69 @@
         && ((u.hostname === 'cdn.sidequestvr.com' && u.pathname.startsWith('/file/')) || (u.hostname === 'raw.githubusercontent.com' && u.pathname.startsWith('/SideQuestVR/Creator-Community/main/'))) ? u.href : null;
     } catch { return null; }
   }
+  function gallery(entry) {
+    const cover = imageUrl(entry.previewImage);
+    const items = snapshot?.media?.find(g => g.id === entry.id)?.items;
+    const valid = Array.isArray(items) && items.length <= 8 ? items.filter(item => {
+      if (!item || !imageUrl(item.url)) return false;
+      if (item.type === 'image') return /\.(png|jpe?g)$/.test(item.url);
+      return ['gif', 'webm'].includes(item.type) && item.url.endsWith(`.${item.type}`)
+        && imageUrl(item.poster) && /\.(png|jpe?g)$/.test(item.poster);
+    }) : [];
+    return cover && !valid.some(item => imageUrl(item.url) === cover)
+      ? [{ type: 'image', url: cover }, ...valid] : valid.length ? valid : cover ? [{ type: 'image', url: cover }] : [];
+  }
+  function selectMedia(index) {
+    if (!mediaItems.length) return;
+    mediaIndex = (index + mediaItems.length) % mediaItems.length;
+    showMedia(false);
+  }
+  async function showMedia(animate) {
+    clearMedia();
+    const item = mediaItems[mediaIndex]; if (!item) return;
+    const controller = new AbortController(); mediaAbort = controller;
+    const timer = setTimeout(() => controller.abort(), 25000);
+    const animated = item.type !== 'image';
+    mediaCount.textContent = `${mediaIndex + 1} / ${mediaItems.length}`;
+    previousMedia.hidden = nextMedia.hidden = mediaItems.length < 2;
+    mediaAction.hidden = !animated;
+    mediaAction.lastChild.textContent = animate ? 'Show poster' : item.type === 'webm' ? 'Load video' : 'Load animation';
+    mediaAction.onclick = () => showMedia(!animate);
+    mediaRetry.hidden = true; zoomStatus.textContent = 'Loading preview...';
+    const url = imageUrl(animated && !animate ? item.poster : item.url);
+    const max = animate && item.type === 'webm' ? 16 * 1024 * 1024 : 2 * 1024 * 1024;
+    try {
+      if (!url) throw Error('Unapproved preview URL.');
+      const response = await fetch(url, { signal: controller.signal, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
+      if (!response.ok || !response.body) throw Error('Preview unavailable.');
+      if (Number(response.headers.get('content-length')) > max) throw Error('Preview exceeds its size limit.');
+      const reader = response.body.getReader(), chunks = []; let size = 0;
+      try {
+        while (true) { const { value, done } = await reader.read(); if (done) break; size += value.length; if (size > max) throw Error('Preview exceeds its size limit.'); chunks.push(value); }
+      } finally { await reader.cancel(); }
+      if (controller.signal.aborted || mediaAbort !== controller || !zoom.open) return;
+      const type = animate ? item.type : 'image';
+      const mime = type === 'webm' ? 'video/webm' : type === 'gif' ? 'image/gif' : url.endsWith('.png') ? 'image/png' : 'image/jpeg';
+      mediaBlob = URL.createObjectURL(new Blob(chunks, { type: mime }));
+      const media = el(type === 'webm' ? 'video' : 'img');
+      media.setAttribute('aria-label', `${mediaName} preview ${mediaIndex + 1}`);
+      if (type === 'webm') { media.controls = true; media.preload = 'metadata'; media.playsInline = true; }
+      else media.alt = `${mediaName} preview ${mediaIndex + 1}`;
+      media.addEventListener('error', () => { if (mediaAbort === controller) { zoomStatus.textContent = 'Preview cannot be displayed. Try its static poster.'; mediaRetry.hidden = false; } });
+      const sizeEvent = type === 'webm' ? 'loadedmetadata' : 'load';
+      media.addEventListener(sizeEvent, () => {
+        const width = media.videoWidth || media.naturalWidth, height = media.videoHeight || media.naturalHeight;
+        if (width > 4096 || height > 4096 || width * height > 4 * 1024 * 1024) {
+          if (type === 'webm') media.pause();
+          media.remove(); zoomStatus.textContent = 'Preview dimensions exceed the limit.'; mediaRetry.hidden = false;
+        }
+      });
+      media.src = mediaBlob; zoomStage.append(media);
+      zoomStatus.textContent = animated && !animate ? `${item.type === 'gif' ? 'GIF' : 'WebM'} / Static poster` : '';
+    } catch (error) {
+      if (mediaAbort === controller && zoom.open) { zoomStatus.textContent = controller.signal.aborted ? 'Preview timed out. Try again.' : String(error.message || error); mediaRetry.hidden = false; }
+    } finally { clearTimeout(timer); }
+  }
   function bytes(value) { return value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KB` : `${(value / (1024 * 1024)).toFixed(1)} MB`; }
   function unityImport(entry) {
     return ['graph', 'prefab', 'plugin', 'community-tool'].includes(entry.category)
@@ -179,18 +305,20 @@
     if (busy) return;
     busy = true; refresh.disabled = true; updateDownloads(); status('Choose a destination. The package will be checked before saving.');
     window.dispatchEvent(new CustomEvent('creator-community-busy', { detail: true }));
-    try { status(await invoke('download_community_package', { id: entry.id })); }
+    try { status(await runTransfer('download_community_package', { id: entry.id })); }
     catch (error) { status(String(error), true); }
     finally { busy = false; refresh.disabled = false; updateDownloads(); window.dispatchEvent(new CustomEvent('creator-community-busy', { detail: false })); }
   }
   function item(entry) {
     const article = el('article', 'community-item'); article.dataset.id = entry.id;
-    const visual = el('div', 'community-visual'); const source = imageUrl(entry.previewImage);
+    const visual = el('div', 'community-visual'); const media = gallery(entry);
+    const source = imageUrl(entry.previewImage) || imageUrl(media[0]?.poster || media[0]?.url);
     if (source) {
-      const open = button('', 'community-image-button', () => { zoomImage.src = source; zoomImage.alt = `${entry.name} preview`; zoom.showModal(); });
+      const open = button('', 'community-image-button', () => { mediaItems = media; mediaName = entry.name; zoomTitle.textContent = entry.name; zoom.showModal(); selectMedia(0); });
       open.title = 'Enlarge preview'; open.setAttribute('aria-label', `Enlarge ${entry.name} preview`);
       const image = el('img'); image.src = source; image.alt = `${entry.name} preview`; image.loading = 'lazy'; image.referrerPolicy = 'no-referrer';
-      image.addEventListener('error', () => { open.replaceChildren(icon('plugins'), el('span', '', 'Preview unavailable')); open.disabled = true; }); open.append(image); visual.append(open);
+      image.addEventListener('error', () => { open.replaceChildren(icon('plugins'), el('span', '', 'Preview unavailable')); }); open.append(image); visual.append(open);
+      if (media.length > 1) open.append(el('span', 'community-media-badge', `${media.length} previews`));
     } else visual.append(icon('plugins'), el('span', '', 'No preview supplied'));
     const body = el('div', 'community-item-body');
     const meta = el('div', 'community-meta'); meta.append(el('span', 'community-type', types[entry.category] || 'Contribution'));
