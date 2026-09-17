@@ -29,6 +29,13 @@ const STABLE_HASHES: &[&str] = &[
     "4af0449cdb8f192a2a0ec8498db78790cf9f185e08fb9bac95c237ad7e152a5d",
     "eb62f266835bf42814c3decc224197cb74842fc316428390645d314ca28243a7",
 ];
+// Exact grid helper shipped with Hub 0.1.1 through 0.1.6.
+const GRID_HASHES: &[&str] = &[
+    "b9624dfda50c815913ee4e3555c3b5abcfdfc3a557c7eaf3bcb2061dbde08faf",
+    "7e1bc8fb937a3324de67fb2439b8e943dda3efc6b62684da2697e1bfcfe7414e",
+    "4af0449cdb8f192a2a0ec8498db78790cf9f185e08fb9bac95c237ad7e152a5d",
+    "506799fb7c9a3868d212c635217ba853084e20fc6b22c772b7565fb54ac8ab07",
+];
 const FILES: &[(&str, &[u8])] = &[
     (
         "package.json",
@@ -185,6 +192,7 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
     let mut current = true;
     let mut legacy = true;
     let mut stable = true;
+    let mut grid = true;
     for (index, (name, expected)) in FILES.iter().enumerate() {
         let Ok(bytes) = read(&destination.join(name), 256 * 1024) else {
             return Ok("different");
@@ -193,8 +201,9 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
         let hash = digest(&bytes);
         legacy &= hash == LEGACY_HASHES[index];
         stable &= hash == STABLE_HASHES[index];
+        grid &= hash == GRID_HASHES[index];
     }
-    if !current && !legacy && !stable {
+    if !current && !legacy && !stable && !grid {
         return Ok("different");
     }
     let mut pending = vec![destination.to_path_buf()];
@@ -995,6 +1004,55 @@ fn status(target: &Target, request_id: &str) -> Result<Outcome, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn grid_helper_gallery_upgrade_backs_up_and_rejects_user_edits() {
+        let old: &[(&str, &[u8])] = &[
+            ("package.json", include_bytes!("../../tests/fixtures/helper-stable-0.1.6/unity/com.creatorworks.plugins/package.json")),
+            ("LICENSE.md", include_bytes!("../../tests/fixtures/helper-stable-0.1.6/unity/com.creatorworks.plugins/LICENSE.md")),
+            ("Editor/CreatorWorks.Plugins.Editor.asmdef", include_bytes!("../../tests/fixtures/helper-stable-0.1.6/unity/com.creatorworks.plugins/Editor/CreatorWorks.Plugins.Editor.asmdef")),
+            ("Editor/CreatorPluginsWindow.cs", include_bytes!("../../tests/fixtures/helper-stable-0.1.6/unity/com.creatorworks.plugins/Editor/CreatorPluginsWindow.cs")),
+        ];
+        for modified in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            project(temp.path());
+            for ((name, bytes), hash) in old.iter().zip(GRID_HASHES) {
+                assert_eq!(digest(bytes), *hash);
+                save_new(&temp.path().join(PACKAGE).join(name), bytes).unwrap();
+            }
+            if modified {
+                fs::write(
+                    temp.path()
+                        .join(PACKAGE)
+                        .join("Editor/CreatorPluginsWindow.cs"),
+                    b"user edits",
+                )
+                .unwrap();
+            }
+            let before = helper_snapshot(&temp.path().join(PACKAGE)).unwrap();
+            let target = inspect(temp.path()).unwrap();
+            assert_eq!(
+                target.helper,
+                if modified { "different" } else { "outdated" }
+            );
+            if modified {
+                assert!(install(&target).is_err());
+                assert_eq!(helper_snapshot(&temp.path().join(PACKAGE)).unwrap(), before);
+            } else {
+                install(&target).unwrap();
+                assert_eq!(helper_state(temp.path()).unwrap(), "installed");
+                let backup = fs::read_dir(area(temp.path(), "helper-backups").unwrap())
+                    .unwrap()
+                    .next()
+                    .unwrap()
+                    .unwrap()
+                    .path();
+                assert_eq!(
+                    helper_snapshot(&backup.join("com.creatorworks.plugins")).unwrap(),
+                    before
+                );
+            }
+        }
+    }
     const STABLE_FILES: &[(&str, &[u8])] = &[
         ("package.json", include_bytes!("../../tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins/package.json")),
         ("LICENSE.md", include_bytes!("../../tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins/LICENSE.md")),

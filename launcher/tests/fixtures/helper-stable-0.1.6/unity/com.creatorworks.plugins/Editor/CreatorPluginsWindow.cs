@@ -18,9 +18,6 @@ namespace CreatorWorks.Plugins
     [Serializable] internal sealed class Author { public string name, url, discord; }
     [Serializable] internal sealed class Compatibility { public string[] unity, creatorSdk, banterSdk; }
     [Serializable] internal sealed class PackageDownload { public string url, path, sha256; public long byteLength; }
-    [Serializable] internal sealed class PreviewMedia { public string type, url, poster; }
-    [Serializable] internal sealed class Gallery { public string id; public PreviewMedia[] items; }
-    [Serializable] internal sealed class MediaIndex { public int schemaVersion; public Gallery[] galleries; }
     [Serializable] internal sealed class Listing
     {
         public int schemaVersion;
@@ -76,28 +73,6 @@ namespace CreatorWorks.Plugins
             if (uri.Host == "raw.githubusercontent.com") return uri.AbsolutePath.StartsWith("/SideQuestVR/Creator-Community/main/", StringComparison.Ordinal);
             return !media && (uri.Host == "github.com" || uri.Host == "discord.com") && uri.AbsolutePath != "/";
         }
-        private static bool PreviewUrl(string value, params string[] extensions) =>
-            (RepositoryPath(value) || WebUrl(value, true)) && extensions.Any(e => value.EndsWith(e, StringComparison.Ordinal));
-        internal static Gallery[] ParseMedia(byte[] bytes)
-        {
-            if (bytes.Length > 256 * 1024) throw new InvalidDataException("Preview gallery exceeds its size limit.");
-            var index = JsonUtility.FromJson<MediaIndex>(Encoding.UTF8.GetString(bytes));
-            if (index == null || index.schemaVersion != 1 || index.galleries == null || index.galleries.Length > 50) throw new InvalidDataException("Invalid preview gallery.");
-            var ids = new HashSet<string>();
-            foreach (var gallery in index.galleries)
-            {
-                if (gallery == null || !Text(gallery.id, 100) || !ids.Add(gallery.id) || gallery.items == null || gallery.items.Length < 1 || gallery.items.Length > 8) throw new InvalidDataException("Invalid preview gallery entries.");
-                foreach (var item in gallery.items)
-                {
-                    if (item == null) throw new InvalidDataException("Invalid preview media.");
-                    bool valid = item.type == "image" ? PreviewUrl(item.url, ".png", ".jpg", ".jpeg") && item.poster == null :
-                        (item.type == "gif" || item.type == "webm") && PreviewUrl(item.url, "." + item.type) && PreviewUrl(item.poster, ".png", ".jpg", ".jpeg");
-                    if (!valid) throw new InvalidDataException("Unapproved preview media or missing static poster.");
-                }
-            }
-            return index.galleries;
-        }
-        internal static string StaticPreview(PreviewMedia item) => item.type == "image" ? item.url : item.poster;
         internal static string DownloadUrl(PackageDownload download)
         {
             if (download == null || download.byteLength <= 0 || download.byteLength > MaxPackage || !Hex(download.sha256, 64)) throw new InvalidDataException("Invalid package size or checksum.");
@@ -666,9 +641,6 @@ namespace CreatorWorks.Plugins
         private Vector2 scroll;
         private readonly Dictionary<string, Texture2D> previews = new Dictionary<string, Texture2D>();
         private readonly HashSet<string> previewAttempts = new HashSet<string>();
-        private readonly Dictionary<string, PreviewMedia[]> galleries = new Dictionary<string, PreviewMedia[]>();
-        private readonly Dictionary<string, int> galleryPositions = new Dictionary<string, int>();
-        private UnityWebRequest galleryRequest;
         private UnityWebRequest previewRequest;
         private string previewKey;
         private double previewDeadline;
@@ -690,7 +662,6 @@ namespace CreatorWorks.Plugins
         private void StopDownload() { if (request != null) { request.Abort(); request.Dispose(); request = null; } success = null; failure = null; }
         private void Tick()
         {
-            TickGallery();
             TickPreview();
             if (request != null)
             {
@@ -728,9 +699,6 @@ namespace CreatorWorks.Plugins
         {
             if (request != null || ImportReview.Busy) return;
             catalogueFresh = false; message = "Loading catalogue..."; listings.Clear(); selected = null; ClearPreviews(); warnings = 0;
-            galleryRequest = new UnityWebRequest(PluginProtocol.Root + "media.json", UnityWebRequest.kHttpVerbGET) { downloadHandler = new BoundedDownload(256 * 1024), timeout = 5, redirectLimit = 0 };
-            try { galleryRequest.SendWebRequest(); }
-            catch { galleryRequest.Dispose(); galleryRequest = null; }
             Fetch(PluginProtocol.Root + "index.json", 32 * 1024, bytes =>
             {
                 var index = JsonUtility.FromJson<CatalogueIndex>(Encoding.UTF8.GetString(bytes));
@@ -809,40 +777,17 @@ namespace CreatorWorks.Plugins
         }
         private void ClearPreviews()
         {
-            if (galleryRequest != null) { galleryRequest.Abort(); galleryRequest.Dispose(); galleryRequest = null; }
-            galleries.Clear(); galleryPositions.Clear();
             if (previewRequest != null) { previewRequest.Abort(); previewRequest.Dispose(); previewRequest = null; }
             foreach (var texture in previews.Values) if (texture != null) DestroyImmediate(texture);
             previews.Clear(); previewAttempts.Clear(); previewKey = null;
         }
         private void RequestPreview(Listing entry)
         {
-            RequestImage(entry.previewImage);
-        }
-        private void TickGallery()
-        {
-            if (galleryRequest == null || !galleryRequest.isDone) return;
-            try
-            {
-                if (galleryRequest.result != UnityWebRequest.Result.Success || galleryRequest.responseCode != 200) return;
-                foreach (var gallery in PluginProtocol.ParseMedia(((BoundedDownload)galleryRequest.downloadHandler).Bytes())) galleries.Add(gallery.id, gallery.items);
-            }
-            catch { galleries.Clear(); /* Optional media failure cannot disable imports. */ }
-            finally { galleryRequest.Dispose(); galleryRequest = null; Repaint(); }
-        }
-        internal PreviewMedia[] GalleryItems(Listing entry)
-        {
-            var items = galleries.TryGetValue(entry.id, out var value) ? value : Array.Empty<PreviewMedia>();
-            if (!string.IsNullOrEmpty(entry.previewImage) && !items.Any(item => item.url == entry.previewImage))
-                return new[] { new PreviewMedia { type = "image", url = entry.previewImage } }.Concat(items).ToArray();
-            return items;
-        }
-        private void RequestImage(string key)
-        {
+            string key = entry.previewImage;
             if (string.IsNullOrEmpty(key) || previewRequest != null || previewAttempts.Contains(key)) return;
             previewAttempts.Add(key);
             string url = PluginProtocol.RepositoryPath(key) ? PluginProtocol.RepositoryUrl(key) : key;
-            if (!PluginProtocol.WebUrl(url, true)) return;
+            if (!PluginProtocol.WebUrl(url)) return;
             previewRequest = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET) { downloadHandler = new BoundedDownload(2 * 1024 * 1024), timeout = 25, redirectLimit = 0 };
             previewKey = key; previewDeadline = EditorApplication.timeSinceStartup + 27;
             try { previewRequest.SendWebRequest(); }
@@ -861,16 +806,11 @@ namespace CreatorWorks.Plugins
                 if (!PluginProtocol.ImageDimensions(bytes)) throw new InvalidDataException("Preview dimensions or format are unsupported.");
                 texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave };
                 if (!texture.LoadImage(bytes, true)) throw new InvalidDataException("Preview unavailable.");
-                // Keep a bounded cache even when users browse every image in every gallery.
+                // At most 50 listings, each retaining only a 320px thumbnail, never full-size images.
                 if (texture.width > 320 || texture.height > 320)
                 {
                     Texture2D thumbnail = MakeThumbnail(texture);
                     DestroyImmediate(texture); texture = thumbnail;
-                }
-                if (previews.Count >= 50)
-                {
-                    string oldest = previews.Keys.First(); DestroyImmediate(previews[oldest]);
-                    previews.Remove(oldest); previewAttempts.Remove(oldest);
                 }
                 previews[previewKey] = texture; texture = null;
             }
@@ -1069,29 +1009,15 @@ namespace CreatorWorks.Plugins
         }
         private void DrawCardPreview(Listing entry, Rect rect)
         {
-            var items = GalleryItems(entry);
-            int index = galleryPositions.TryGetValue(entry.id, out var saved) && saved < items.Length ? saved : 0;
-            string key = items.Length == 0 ? null : PluginProtocol.StaticPreview(items[index]);
-            bool animated = items.Length > 0 && items[index].type != "image";
-            if (items.Length > 1 || animated)
-            {
-                var controls = new Rect(rect.x, rect.yMax - 22, rect.width, 22);
-                rect.height -= 24;
-                if (items.Length > 1)
-                {
-                    if (GUI.Button(new Rect(controls.x, controls.y, 24, 20), new GUIContent("<", "Previous preview"))) galleryPositions[entry.id] = (index + items.Length - 1) % items.Length;
-                    if (GUI.Button(new Rect(controls.xMax - 24, controls.y, 24, 20), new GUIContent(">", "Next preview"))) galleryPositions[entry.id] = (index + 1) % items.Length;
-                }
-                GUI.Label(new Rect(controls.x + 24, controls.y, controls.width - 48, 20), (index + 1) + "/" + items.Length + (animated ? " Poster" : ""), previewLabel);
-            }
             if (Event.current.type != EventType.Repaint) return;
             EditorGUI.DrawRect(rect, EditorGUIUtility.isProSkin ? new Color(.09f, .10f, .11f) : new Color(.72f, .73f, .74f));
+            string key = entry.previewImage;
             if (!string.IsNullOrEmpty(key) && previews.TryGetValue(key, out var texture)) GUI.DrawTexture(rect, texture, ScaleMode.ScaleToFit);
             else
             {
                 bool attempted = !string.IsNullOrEmpty(key) && previewAttempts.Contains(key);
                 GUI.Label(rect, string.IsNullOrEmpty(key) ? "No preview" : attempted && key != previewKey ? "Preview unavailable" : "Loading preview...", previewLabel);
-                if (rect.yMax >= scroll.y && rect.yMin <= scroll.y + position.height) RequestImage(key);
+                if (rect.yMax >= scroll.y && rect.yMin <= scroll.y + position.height) RequestPreview(entry);
             }
         }
         private void DrawDetails()

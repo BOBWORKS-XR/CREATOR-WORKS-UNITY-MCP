@@ -103,6 +103,7 @@ struct Index {
 #[derive(Clone, Serialize)]
 pub struct Snapshot {
     entries: Vec<Listing>,
+    media: Vec<Gallery>,
     warnings: Vec<String>,
     stale: bool,
     #[serde(rename = "projectImportEnabled")]
@@ -112,6 +113,7 @@ impl Default for Snapshot {
     fn default() -> Self {
         Self {
             entries: Vec::new(),
+            media: Vec::new(),
             warnings: Vec::new(),
             stale: false,
             project_import_enabled: PROJECT_IMPORT_ENABLED,
@@ -120,6 +122,74 @@ impl Default for Snapshot {
 }
 #[derive(Default)]
 pub struct Community(Mutex<Option<(Instant, Snapshot)>>);
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PreviewMedia {
+    #[serde(rename = "type")]
+    kind: String,
+    url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    poster: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Gallery {
+    id: String,
+    items: Vec<PreviewMedia>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MediaIndex {
+    schema_version: u32,
+    galleries: Vec<Gallery>,
+}
+fn preview_url(value: &str, extensions: &[&str]) -> bool {
+    (path_ok(value) || web_url(value, true))
+        && extensions
+            .iter()
+            .any(|extension| value.ends_with(extension))
+}
+fn parse_media(bytes: &[u8]) -> Result<Vec<Gallery>, String> {
+    if bytes.len() > 256 * 1024 {
+        return Err("Preview gallery exceeds its size limit.".into());
+    }
+    let index: MediaIndex =
+        serde_json::from_slice(bytes).map_err(|_| "Invalid preview gallery.")?;
+    let mut ids = HashSet::new();
+    if index.schema_version != 1 || index.galleries.len() > 50 {
+        return Err("Unsupported preview gallery.".into());
+    }
+    for gallery in &index.galleries {
+        if !text_ok(&gallery.id, 100)
+            || !ids.insert(&gallery.id)
+            || gallery.items.is_empty()
+            || gallery.items.len() > 8
+        {
+            return Err("Invalid preview gallery entries.".into());
+        }
+        for item in &gallery.items {
+            let valid = match item.kind.as_str() {
+                "image" => {
+                    preview_url(&item.url, &[".png", ".jpg", ".jpeg"]) && item.poster.is_none()
+                }
+                "gif" => preview_url(&item.url, &[".gif"]),
+                "webm" => preview_url(&item.url, &[".webm"]),
+                _ => false,
+            };
+            if !valid
+                || (item.kind != "image"
+                    && !item
+                        .poster
+                        .as_deref()
+                        .is_some_and(|p| preview_url(p, &[".png", ".jpg", ".jpeg"])))
+            {
+                return Err("Unapproved preview media or missing static poster.".into());
+            }
+        }
+    }
+    Ok(index.galleries)
+}
 
 fn text_ok(s: &str, max: usize) -> bool {
     !s.trim().is_empty()
@@ -352,6 +422,23 @@ fn load() -> Result<Snapshot, String> {
                 .push("A listing could not be loaded or did not pass validation.".into()),
         }
     }
+    // Optional sidecar: older consumers reject added listing fields. Media failure
+    // must never hide otherwise valid packages or become installation authority.
+    if let Ok(media_client) = Client::builder()
+        .https_only(true)
+        .timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        match fetch(&media_client, &format!("{ROOT}media.json"), 256 * 1024)
+            .and_then(|bytes| parse_media(&bytes))
+        {
+            Ok(media) => snapshot.media = media,
+            Err(_) => snapshot
+                .warnings
+                .push("Preview galleries unavailable. Cover images are still available.".into()),
+        }
+    }
     Ok(snapshot)
 }
 pub fn catalogue_worker(handle: tauri::AppHandle, refresh: bool) -> Result<Snapshot, String> {
@@ -565,6 +652,40 @@ pub fn queue_import_worker(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn media_sidecar_is_optional_bounded_and_requires_static_posters() {
+        let image = serde_json::json!({"type":"image", "url":"assets/example/front.png"});
+        let mut index = serde_json::json!({"schemaVersion":1,"galleries":[{"id":"example.six-images","items":vec![image;6]}]});
+        let parse = |v: &serde_json::Value| parse_media(&serde_json::to_vec(v).unwrap());
+        assert_eq!(parse(&index).unwrap()[0].items.len(), 6);
+        for kind in ["gif", "webm"] {
+            index["galleries"][0]["items"][0] = serde_json::json!({"type":kind,"url":format!("assets/example/demo.{kind}"),"poster":"assets/example/poster.png"});
+            assert!(parse(&index).is_ok());
+            index["galleries"][0]["items"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("poster");
+            assert!(parse(&index).is_err());
+        }
+        for url in [
+            "https://evil.test/a.png",
+            "https://cdn.sidequestvr.com/file/1/a.svg",
+            "assets/../a.png",
+            "https://cdn.sidequestvr.com/file/1/a.png?x=1",
+        ] {
+            index["galleries"][0]["items"][0] = serde_json::json!({"type":"image","url":url});
+            assert!(parse(&index).is_err());
+        }
+        index["galleries"][0]["items"] = serde_json::json!(vec![
+            serde_json::json!({"type":"image","url":"assets/example/a.png"});
+            9
+        ]);
+        assert!(parse(&index).is_err());
+        assert!(parse_media(&vec![b' '; 256 * 1024 + 1]).is_err());
+        assert!(parse_media(br#"{"schemaVersion":1,"galleries":[]}"#)
+            .unwrap()
+            .is_empty());
+    }
     use super::*;
     #[test]
     fn experimental_import_capability_matches_native_gate() {
