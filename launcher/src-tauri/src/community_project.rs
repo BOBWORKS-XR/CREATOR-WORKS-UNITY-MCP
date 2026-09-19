@@ -122,6 +122,7 @@ fn reject_links(path: &Path) -> Result<(), String> {
     for ancestor in path.ancestors() {
         match fs::symlink_metadata(ancestor) {
             Ok(meta) => {
+                #[allow(unused_mut)]
                 let mut linked = meta.file_type().is_symlink();
                 #[cfg(windows)]
                 {
@@ -256,7 +257,25 @@ fn editor_open(root: &Path) -> Result<bool, String> {
             Err(_) => Ok(true), // Sharing/access failures remain fail-closed.
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    {
+        if !path.exists() {
+            return Ok(false);
+        }
+        use fs2::FileExt;
+        match fs::File::open(&path) {
+            Ok(file) => match file.try_lock_exclusive() {
+                Ok(()) => {
+                    let _ = file.unlock();
+                    Ok(false)
+                }
+                Err(_) => Ok(true),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(_) => Ok(true),
+        }
+    }
+    #[cfg(not(any(windows, unix)))]
     {
         Ok(path.exists())
     }
@@ -1520,9 +1539,16 @@ mod tests {
             use std::os::windows::fs::OpenOptionsExt;
             options.share_mode(0);
         }
-        options.open(root.join("Temp/UnityLockfile")).unwrap()
+        #[cfg(unix)]
+        options.write(true);
+        let file = options.open(root.join("Temp/UnityLockfile")).unwrap();
+        #[cfg(unix)]
+        {
+            use fs2::FileExt;
+            file.lock_exclusive().unwrap();
+        }
+        file
     }
-    #[cfg(windows)]
     #[test]
     fn stale_editor_lock_is_preserved_and_does_not_block_menu_installation() {
         let temp = tempfile::tempdir().unwrap();
