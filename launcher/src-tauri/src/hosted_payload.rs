@@ -55,10 +55,12 @@ pub fn lock_image(path: &Path) -> Result<(File, String), String> {
     Ok((file, format!("{:x}", digest.finalize())))
 }
 
+#[allow(dead_code)]
 pub fn lock(directory: &Path) -> Result<Vec<File>, String> {
     verify(directory, FILES)
 }
 
+#[allow(dead_code)]
 fn verify(directory: &Path, files: &[(&str, &str)]) -> Result<Vec<File>, String> {
     files.iter().map(|(name, expected)| {
         let (file, hash) = lock_image(&directory.join(name))?;

@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -11,7 +12,7 @@ permissions:
 jobs:
   windows:
     # Previews and reviewed Windows 2.7.x releases promote exact accepted artifacts.
-    if: ${{ !contains(github.ref_name, '-') && github.ref_name != 'v2.7.0' && github.ref_name != 'v2.7.1' && github.ref_name != 'v2.7.2' }}
+    if: ${{ (!contains(github.ref_name, '-') || github.event_name == 'workflow_dispatch') && github.ref_name != 'v2.7.0' && github.ref_name != 'v2.7.1' && github.ref_name != 'v2.7.2' }}
     name: Windows installer and standalone bundle
     runs-on: windows-latest
     steps:
@@ -80,7 +81,7 @@ jobs:
           }
 
   linux:
-    if: ${{ !contains(github.ref_name, '-') && github.ref_name != 'v2.7.0' && github.ref_name != 'v2.7.1' && github.ref_name != 'v2.7.2' }}
+    if: ${{ (!contains(github.ref_name, '-') || github.event_name == 'workflow_dispatch') && github.ref_name != 'v2.7.0' && github.ref_name != 'v2.7.1' && github.ref_name != 'v2.7.2' }}
     name: Linux AppImage, DEB, and RPM bundle
     runs-on: ubuntu-22.04
     steps:
@@ -123,7 +124,7 @@ jobs:
           args: "--bundles appimage,deb,rpm"
 
   macos:
-    if: ${{ !contains(github.ref_name, '-') && github.ref_name != 'v2.7.0' && github.ref_name != 'v2.7.1' && github.ref_name != 'v2.7.2' }}
+    if: ${{ (!contains(github.ref_name, '-') || github.event_name == 'workflow_dispatch') && github.ref_name != 'v2.7.0' && github.ref_name != 'v2.7.1' && github.ref_name != 'v2.7.2' }}
     name: macOS DMG bundle
     runs-on: macos-latest
     steps:

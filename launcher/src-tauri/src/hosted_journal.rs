@@ -34,6 +34,7 @@ pub struct Journal {
 }
 
 impl Journal {
+    #[allow(dead_code)]
     pub fn open(directory: &Path) -> Result<Self, String> {
         let path = directory.join("hosted-operation-outcomes.json");
         let data = match std::fs::File::open(&path) {
@@ -108,6 +109,7 @@ impl Journal {
             .map(|record| record.command.as_str())
             .collect()
     }
+    #[allow(dead_code)]
     pub fn acknowledge_unknowns(&mut self) -> Result<(), String> {
         for record in &mut self.data.records {
             if record.outcome == Outcome::Accepted {

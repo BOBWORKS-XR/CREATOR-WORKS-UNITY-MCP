@@ -1,5 +1,6 @@
 // Native acceptance fixture: about:blank, unique app identity, no plugins,
 // configuration handlers, scene discovery, installed files or client shutdown.
+#[cfg(windows)]
 #[path = "../src/lifecycle.rs"]
 mod lifecycle;
 
