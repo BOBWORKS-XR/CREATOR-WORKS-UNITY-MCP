@@ -120,6 +120,13 @@ fn hex(value: &str, length: usize) -> bool {
 }
 fn reject_links(path: &Path) -> Result<(), String> {
     for ancestor in path.ancestors() {
+        #[cfg(target_os = "macos")]
+        if ancestor == Path::new("/var")
+            || ancestor == Path::new("/tmp")
+            || ancestor == Path::new("/etc")
+        {
+            continue;
+        }
         match fs::symlink_metadata(ancestor) {
             Ok(meta) => {
                 #[allow(unused_mut)]
