@@ -90,6 +90,16 @@ jobs:
       - run: npm ci
       - run: npm run release:launcher
       - run: NO_STRIP=1 cargo tauri build
+      - name: Retain development packages (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-development-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            launcher/src-tauri/target/release/bundle/appimage/*.AppImage
+            launcher/src-tauri/target/release/bundle/deb/*.deb
+            launcher/src-tauri/target/release/bundle/rpm/*.rpm
       - run: npm run build:standalone
       - run: cargo fmt --check
         working-directory: launcher/src-tauri
@@ -127,6 +137,14 @@ jobs:
       - run: npm ci
       - run: npm run release:launcher
       - run: cargo tauri build --bundles dmg
+      - name: Retain development packages (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-development-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            launcher/src-tauri/target/release/bundle/dmg/*.dmg
       - run: npm run build:standalone
       - run: cargo fmt --check
         working-directory: launcher/src-tauri
