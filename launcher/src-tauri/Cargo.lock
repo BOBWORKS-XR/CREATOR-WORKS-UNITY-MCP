@@ -463,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "creator-works-mcp-launcher"
-version = "2.7.2"
+version = "2.7.3"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
