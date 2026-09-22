@@ -81,15 +81,14 @@ jobs:
             build-essential \
             file
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version 2.9.6 --locked
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: launcher/src-tauri -> target
       - run: npm ci
       - run: npm run release:launcher
-      - run: NO_STRIP=1 cargo tauri build
+      - name: Build with the pinned official prebuilt Tauri CLI
+        run: NO_STRIP=1 npx --yes --package=@tauri-apps/cli@2.9.6 tauri build
       - name: Retain development packages (not a release)
         uses: actions/upload-artifact@v4
         with:
@@ -128,15 +127,14 @@ jobs:
           node-version: 24
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version 2.9.6 --locked
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: launcher/src-tauri -> target
       - run: npm ci
       - run: npm run release:launcher
-      - run: cargo tauri build --bundles dmg
+      - name: Build with the pinned official prebuilt Tauri CLI
+        run: npx --yes --package=@tauri-apps/cli@2.9.6 tauri build --bundles dmg
       - name: Retain development packages (not a release)
         uses: actions/upload-artifact@v4
         with:
