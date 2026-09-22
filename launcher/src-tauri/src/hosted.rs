@@ -474,9 +474,41 @@ fn parent_host() -> Result<String, String> {
         Ok(path)
     }
 }
-#[cfg(not(windows))]
+
+#[cfg(target_os = "linux")]
 fn parent_host() -> Result<String, String> {
-    Err("Native hosting preview is Windows-only.".into())
+    unsafe {
+        let mut stat_in: libc::stat = std::mem::zeroed();
+        let mut stat_out: libc::stat = std::mem::zeroed();
+        if libc::fstat(0, &mut stat_in) != 0 || libc::fstat(1, &mut stat_out) != 0 {
+            return Err("Cannot inspect hosted streams.".into());
+        }
+        if (stat_in.st_mode & libc::S_IFMT) != libc::S_IFIFO
+            || (stat_out.st_mode & libc::S_IFMT) != libc::S_IFIFO
+        {
+            return Err("Hosted mode requires private inherited input and output pipes.".into());
+        }
+        let ppid = libc::getppid();
+        if ppid <= 1 {
+            return Err("Cannot verify the parent process.".into());
+        }
+        let exe_link = format!("/proc/{ppid}/exe");
+        let path = std::fs::read_link(&exe_link)
+            .map_err(|_| String::from("Cannot verify Creator Hub's process."))?;
+        let valid_name = path.file_name().is_some_and(|name| {
+            let n = name.to_string_lossy();
+            n.eq_ignore_ascii_case("creator-hub") || n.eq_ignore_ascii_case("creator-hub.exe")
+        });
+        if !valid_name {
+            return Err("Hosted mode must be launched directly by Creator Hub.".into());
+        }
+        Ok(path.to_string_lossy().into_owned())
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn parent_host() -> Result<String, String> {
+    Err("Native hosting preview is not supported on this platform yet.".into())
 }
 
 pub fn run() -> Result<(), String> {

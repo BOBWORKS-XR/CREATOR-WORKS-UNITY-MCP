@@ -81,15 +81,24 @@ jobs:
             build-essential \
             file
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version 2.9.6 --locked
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: launcher/src-tauri -> target
       - run: npm ci
       - run: npm run release:launcher
-      - run: NO_STRIP=1 cargo tauri build
+      - name: Build with the pinned official prebuilt Tauri CLI
+        run: NO_STRIP=1 npx --yes --package=@tauri-apps/cli@2.9.6 tauri build
+      - name: Retain development packages (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-development-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            launcher/src-tauri/target/release/bundle/appimage/*.AppImage
+            launcher/src-tauri/target/release/bundle/deb/*.deb
+            launcher/src-tauri/target/release/bundle/rpm/*.rpm
       - run: npm run build:standalone
       - run: cargo fmt --check
         working-directory: launcher/src-tauri
@@ -101,8 +110,16 @@ jobs:
         run: node scripts/cli/setup.mjs install
 
   launcher-macos:
-    name: Tauri launcher (macOS)
-    runs-on: macos-latest
+    name: Tauri launcher (macOS ${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: Apple silicon
+          - os: macos-15-intel
+            label: Intel
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -110,15 +127,22 @@ jobs:
           node-version: 24
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version 2.9.6 --locked
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: launcher/src-tauri -> target
       - run: npm ci
       - run: npm run release:launcher
-      - run: cargo tauri build --bundles dmg
+      - name: Build with the pinned official prebuilt Tauri CLI
+        run: npx --yes --package=@tauri-apps/cli@2.9.6 tauri build --bundles dmg
+      - name: Retain development packages (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-development-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            launcher/src-tauri/target/release/bundle/dmg/*.dmg
       - run: npm run build:standalone
       - run: cargo fmt --check
         working-directory: launcher/src-tauri

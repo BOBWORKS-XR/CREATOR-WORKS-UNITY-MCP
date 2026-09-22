@@ -5,3 +5,4 @@ launcher/unity/com.creatorworks.plugins/** -text
 launcher/tests/fixtures/helper-alpha8/** -text
 launcher/tests/fixtures/helper-stable-0.1.0/** -text
 launcher/tests/fixtures/helper-stable-0.1.6/** -text
+launcher/tests/fixtures/helper-stable-0.1.7/** -text

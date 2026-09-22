@@ -36,6 +36,13 @@ const GRID_HASHES: &[&str] = &[
     "4af0449cdb8f192a2a0ec8498db78790cf9f185e08fb9bac95c237ad7e152a5d",
     "506799fb7c9a3868d212c635217ba853084e20fc6b22c772b7565fb54ac8ab07",
 ];
+// Exact gallery helper shipped in Hub 0.1.7, Setup 0.3.1 and MCP 2.7.2.
+const GALLERY_HASHES: &[&str] = &[
+    "0623bfb2e8e65a3d1bad2daaa2d6ca1271c69b34b6de8c01bdf32f566b6c3b67",
+    "7e1bc8fb937a3324de67fb2439b8e943dda3efc6b62684da2697e1bfcfe7414e",
+    "4af0449cdb8f192a2a0ec8498db78790cf9f185e08fb9bac95c237ad7e152a5d",
+    "192254c2c3fbd02c4df00e2fafa1f26c90dd911e62cc3cc7451d440240a4c206",
+];
 const FILES: &[(&str, &[u8])] = &[
     (
         "package.json",
@@ -120,8 +127,16 @@ fn hex(value: &str, length: usize) -> bool {
 }
 fn reject_links(path: &Path) -> Result<(), String> {
     for ancestor in path.ancestors() {
+        #[cfg(target_os = "macos")]
+        if ancestor == Path::new("/var")
+            || ancestor == Path::new("/tmp")
+            || ancestor == Path::new("/etc")
+        {
+            continue;
+        }
         match fs::symlink_metadata(ancestor) {
             Ok(meta) => {
+                #[allow(unused_mut)]
                 let mut linked = meta.file_type().is_symlink();
                 #[cfg(windows)]
                 {
@@ -193,6 +208,7 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
     let mut legacy = true;
     let mut stable = true;
     let mut grid = true;
+    let mut gallery = true;
     for (index, (name, expected)) in FILES.iter().enumerate() {
         let Ok(bytes) = read(&destination.join(name), 256 * 1024) else {
             return Ok("different");
@@ -202,8 +218,9 @@ fn helper_contents(destination: &Path, allow_unity_metadata: bool) -> Result<&'s
         legacy &= hash == LEGACY_HASHES[index];
         stable &= hash == STABLE_HASHES[index];
         grid &= hash == GRID_HASHES[index];
+        gallery &= hash == GALLERY_HASHES[index];
     }
-    if !current && !legacy && !stable && !grid {
+    if !current && !legacy && !stable && !grid && !gallery {
         return Ok("different");
     }
     let mut pending = vec![destination.to_path_buf()];
@@ -256,7 +273,25 @@ fn editor_open(root: &Path) -> Result<bool, String> {
             Err(_) => Ok(true), // Sharing/access failures remain fail-closed.
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    {
+        if !path.exists() {
+            return Ok(false);
+        }
+        use fs2::FileExt;
+        match fs::File::open(&path) {
+            Ok(file) => match file.try_lock_exclusive() {
+                Ok(()) => {
+                    let _ = file.unlock();
+                    Ok(false)
+                }
+                Err(_) => Ok(true),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(_) => Ok(true),
+        }
+    }
+    #[cfg(not(any(windows, unix)))]
     {
         Ok(path.exists())
     }
@@ -1110,6 +1145,56 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn gallery_helper_product_upgrade_preserves_old_bytes() {
+        let old: &[(&str, &[u8])] = &[
+            ("package.json", include_bytes!("../../tests/fixtures/helper-stable-0.1.7/unity/com.creatorworks.plugins/package.json")),
+            ("LICENSE.md", include_bytes!("../../tests/fixtures/helper-stable-0.1.7/unity/com.creatorworks.plugins/LICENSE.md")),
+            ("Editor/CreatorWorks.Plugins.Editor.asmdef", include_bytes!("../../tests/fixtures/helper-stable-0.1.7/unity/com.creatorworks.plugins/Editor/CreatorWorks.Plugins.Editor.asmdef")),
+            ("Editor/CreatorPluginsWindow.cs", include_bytes!("../../tests/fixtures/helper-stable-0.1.7/unity/com.creatorworks.plugins/Editor/CreatorPluginsWindow.cs")),
+        ];
+        for modified in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            project(temp.path());
+            for ((name, bytes), hash) in old.iter().zip(GALLERY_HASHES) {
+                assert_eq!(digest(bytes), *hash);
+                save_new(&temp.path().join(PACKAGE).join(name), bytes).unwrap();
+            }
+            if modified {
+                fs::write(
+                    temp.path()
+                        .join(PACKAGE)
+                        .join("Editor/CreatorPluginsWindow.cs"),
+                    b"user edits",
+                )
+                .unwrap();
+            }
+            let before = helper_snapshot(&temp.path().join(PACKAGE)).unwrap();
+            let target = inspect(temp.path()).unwrap();
+            assert_eq!(
+                target.helper,
+                if modified { "different" } else { "outdated" }
+            );
+            if modified {
+                assert!(install(&target).is_err());
+                assert_eq!(helper_snapshot(&temp.path().join(PACKAGE)).unwrap(), before);
+            } else {
+                install(&target).unwrap();
+                assert_eq!(helper_state(temp.path()).unwrap(), "installed");
+                let backup = fs::read_dir(area(temp.path(), "helper-backups").unwrap())
+                    .unwrap()
+                    .next()
+                    .unwrap()
+                    .unwrap()
+                    .path();
+                assert_eq!(
+                    helper_snapshot(&backup.join("com.creatorworks.plugins")).unwrap(),
+                    before
+                );
+            }
+        }
+    }
     const STABLE_FILES: &[(&str, &[u8])] = &[
         ("package.json", include_bytes!("../../tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins/package.json")),
         ("LICENSE.md", include_bytes!("../../tests/fixtures/helper-stable-0.1.0/unity/com.creatorworks.plugins/LICENSE.md")),
@@ -1520,9 +1605,16 @@ mod tests {
             use std::os::windows::fs::OpenOptionsExt;
             options.share_mode(0);
         }
-        options.open(root.join("Temp/UnityLockfile")).unwrap()
+        #[cfg(unix)]
+        options.write(true);
+        let file = options.open(root.join("Temp/UnityLockfile")).unwrap();
+        #[cfg(unix)]
+        {
+            use fs2::FileExt;
+            file.lock_exclusive().unwrap();
+        }
+        file
     }
-    #[cfg(windows)]
     #[test]
     fn stale_editor_lock_is_preserved_and_does_not_block_menu_installation() {
         let temp = tempfile::tempdir().unwrap();

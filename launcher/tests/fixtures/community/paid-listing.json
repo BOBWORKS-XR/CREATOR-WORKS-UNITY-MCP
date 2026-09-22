@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "firerat.shader",
+  "version": "0.1.0",
+  "name": "FireRatShader (Paid)",
+  "category": "plugin",
+  "description": "A paid all-in-one Unity shader for Built-in and URP. Create realistic, toon, crystal and galaxy materials with effects including glowing AudioLink-reactive layers, dissolve, outlines, refraction and fur. Its material optimiser strips unused features for leaner builds. Designed by FireRat for desktop, VR and mobile projects. Purchase links are under Full instructions.",
+  "author": {
+    "name": "FireRat",
+    "url": "https://github.com/FireRat666"
+  },
+  "license": "Commercial EULA (purchase from author)",
+  "licensePath": "packages/firerat.shader/0.1.0/LICENSE-NOTES.md",
+  "instructionsPath": "packages/firerat.shader/0.1.0/README.md",
+  "sourceUrl": "https://github.com/FireRat666/FireRatShader",
+  "compatibility": {
+    "unity": [
+      "2022.3 LTS (author reported)",
+      "6.3 LTS (author reported)"
+    ],
+    "creatorSdk": [],
+    "banterSdk": []
+  },
+  "dependencies": [
+    "Compatible Built-in or Universal Render Pipeline project; see author documentation"
+  ],
+  "includesCode": true,
+  "scope": "instructions-only",
+  "reviewStatus": "listed",
+  "usage": "PAID: Open Full instructions for the Patreon purchase link and official website. Source opens GitHub documentation, not a free shader download. Purchase and install according to the author’s instructions.",
+  "testNotes": "Directory listing only. Author README identifies the product as commercial and confirms shader files are not in the public repository. No purchase, shader import, runtime, SDK or headset testing was performed by the catalogue maintainer.",
+  "previewImage": "packages/firerat.shader/0.1.0/preview.png"
+}

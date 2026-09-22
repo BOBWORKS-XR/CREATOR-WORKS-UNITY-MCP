@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "products": [
+    {
+      "id": "firerat.shader",
+      "version": "0.1.0",
+      "purchaseUrl": "https://www.patreon.com/cw/FireRat",
+      "websiteUrl": "https://shader.firer.at/",
+      "claims": [
+        {
+          "dimension": "unity",
+          "value": "2022.3 LTS",
+          "evidence": "author-reported",
+          "notes": "Author README at https://github.com/FireRat666/FireRatShader reports support; no independent shader import, build or runtime testing by catalogue maintainers."
+        },
+        {
+          "dimension": "unity",
+          "value": "6.3 LTS",
+          "evidence": "author-reported",
+          "notes": "Author README at https://github.com/FireRat666/FireRatShader reports support; no independent shader import, build or runtime testing by catalogue maintainers."
+        },
+        {
+          "dimension": "render-pipeline",
+          "value": "Built-in",
+          "evidence": "author-reported",
+          "notes": "Author README at https://github.com/FireRat666/FireRatShader reports support; no independent shader import, build or runtime testing by catalogue maintainers."
+        },
+        {
+          "dimension": "render-pipeline",
+          "value": "URP",
+          "evidence": "author-reported",
+          "notes": "Author README at https://github.com/FireRat666/FireRatShader reports support; no independent shader import, build or runtime testing by catalogue maintainers."
+        }
+      ]
+    }
+  ]
+}

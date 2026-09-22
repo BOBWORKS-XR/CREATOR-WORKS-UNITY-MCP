@@ -16,6 +16,8 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 #[path = "community_package.rs"]
 mod package;
+#[path = "community_products.rs"]
+mod products;
 #[path = "community_transfer.rs"]
 pub(crate) mod transfer;
 
@@ -155,6 +157,7 @@ struct Index {
 pub struct Snapshot {
     entries: Vec<Listing>,
     media: Vec<Gallery>,
+    products: Vec<products::Product>,
     warnings: Vec<String>,
     stale: bool,
     #[serde(rename = "projectImportEnabled")]
@@ -165,6 +168,7 @@ impl Default for Snapshot {
         Self {
             entries: Vec::new(),
             media: Vec::new(),
+            products: Vec::new(),
             warnings: Vec::new(),
             stale: false,
             project_import_enabled: PROJECT_IMPORT_ENABLED,
@@ -495,6 +499,14 @@ fn load() -> Result<Snapshot, String> {
                 );
             }
         }
+        if let Ok(bytes) = fetch(&media_client, &format!("{ROOT}products.json"), 128 * 1024) {
+            match products::parse(&bytes, &snapshot.entries) {
+                Ok(products) => snapshot.products = products,
+                Err(_) => snapshot
+                    .warnings
+                    .push("Product details unavailable. Existing listings are unchanged.".into()),
+            }
+        }
         match fetch(&media_client, &format!("{ROOT}media.json"), 256 * 1024)
             .and_then(|bytes| parse_media(&bytes))
         {
@@ -562,6 +574,12 @@ pub fn open_link_worker(handle: tauri::AppHandle, id: String, kind: String) -> R
                 "discussion" => entry.discussion_url.ok_or("No discussion link supplied.")?,
                 "instructions" => format!("{REPO}/blob/main/{}", entry.instructions_path),
                 "license" => format!("{REPO}/blob/main/{}", entry.license_path),
+                "purchase" | "product" => {
+                    let state = handle.state::<Community>();
+                    let cache = state.0.lock().map_err(|_| "Community catalogue is busy.")?;
+                    let (_, snapshot) = cache.as_ref().ok_or("Open the catalogue first.")?;
+                    products::action(&snapshot.products, &entry, &kind)?.to_string()
+                }
                 _ => return Err("Unknown community link.".into()),
             }
         }
