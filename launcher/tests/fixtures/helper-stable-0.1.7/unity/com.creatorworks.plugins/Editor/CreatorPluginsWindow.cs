@@ -708,45 +708,6 @@ namespace CreatorWorks.Plugins
         private static void ReleaseLock() { packageLock?.Dispose(); packageLock = null; }
     }
 
-    [Serializable] internal sealed class ProductClaim { public string dimension, value, evidence, notes; }
-    [Serializable] internal sealed class ProductDetails { public string id, version, purchaseUrl, websiteUrl; public ProductClaim[] claims; }
-    [Serializable] internal sealed class ProductIndex { public int schemaVersion; public ProductDetails[] products; }
-    internal static class ProductMetadata
-    {
-        internal static bool ExternalUrl(string value)
-        {
-            if (value == null || value.Contains("\\") || !value.StartsWith("https://", StringComparison.Ordinal)) return false;
-            var authority = value.Substring(8).Split('/')[0];
-            if (!new[] { "www.patreon.com", "patreon.com", "shader.firer.at" }.Contains(authority)) return false;
-            if (string.IsNullOrEmpty(value) || value.Length > 2048 || value.Any(char.IsControl)
-                || !Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != "https"
-                || !string.IsNullOrEmpty(uri.UserInfo) || !uri.IsDefaultPort
-                || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment)) return false;
-            return uri.Host == "shader.firer.at"
-                || ((uri.Host == "www.patreon.com" || uri.Host == "patreon.com") && uri.AbsolutePath.StartsWith("/cw/", StringComparison.Ordinal) && uri.AbsolutePath.Length > 4);
-        }
-        private static bool Text(string value, int max) => !string.IsNullOrWhiteSpace(value) && Encoding.UTF8.GetByteCount(value) <= max && !value.Any(c => char.IsControl(c) && c != '\n' && c != '\t');
-        internal static ProductDetails[] Parse(byte[] bytes, IEnumerable<Listing> listings)
-        {
-            if (bytes == null || bytes.Length > 128 * 1024) throw new InvalidDataException("Product metadata exceeds its limit.");
-            var index = JsonUtility.FromJson<ProductIndex>(Encoding.UTF8.GetString(bytes));
-            if (index == null || index.schemaVersion != 1 || index.products == null || index.products.Length > 50) throw new InvalidDataException("Invalid product metadata.");
-            var keys = new HashSet<string>();
-            foreach (var product in index.products)
-            {
-                if (product == null || !Text(product.id, 100) || !Text(product.version, 80)
-                    || !keys.Add(product.id + "\n" + product.version) || !ExternalUrl(product.purchaseUrl)
-                    || !ExternalUrl(product.websiteUrl) || product.claims == null || product.claims.Length > 20)
-                    throw new InvalidDataException("Invalid product identity or links.");
-                foreach (var claim in product.claims)
-                    if (claim == null || !new[] { "unity", "creator-sdk", "banter-sdk", "render-pipeline", "host-os", "build-target", "runtime" }.Contains(claim.dimension)
-                        || !new[] { "author-reported", "maintainer-tested" }.Contains(claim.evidence)
-                        || !Text(claim.value, 100) || !Text(claim.notes, 1000)) throw new InvalidDataException("Invalid compatibility evidence.");
-            }
-            return index.products.Where(p => listings.Any(e => e.id == p.id && e.version == p.version
-                && e.reviewStatus == "listed" && e.scope == "instructions-only" && e.download == null)).ToArray();
-        }
-    }
     public sealed class CreatorPluginsWindow : EditorWindow
     {
         private static readonly string[] Categories = { "All types", "Visual Scripting", "Prefabs", "Plugins", "Editor tools", "Recipes", "MCP tools", "AI skills" };
@@ -755,9 +716,6 @@ namespace CreatorWorks.Plugins
         private readonly List<ImportRequest> inbox = new List<ImportRequest>();
         private readonly Dictionary<string, ImportReceipt> receipts = new Dictionary<string, ImportReceipt>();
         private Listing selected;
-        private ProductDetails[] products = Array.Empty<ProductDetails>();
-        private ProductDetails Product(Listing entry) => products.FirstOrDefault(p => p.id == entry.id && p.version == entry.version);
-        private void ProductLink(string url) { if (ProductMetadata.ExternalUrl(url)) Application.OpenURL(url); else message = "Unapproved product link."; }
         private Listing pendingImport;
         private string search = "", message = "", queueMessage = "";
         private int category, tab;
@@ -835,7 +793,6 @@ namespace CreatorWorks.Plugins
         {
             if (request != null || ImportReview.Busy) return;
             catalogueFresh = false; message = "Loading catalogue..."; listings.Clear(); selected = null; ClearPreviews(); warnings = 0;
-            products = Array.Empty<ProductDetails>();
             galleryRequest = new UnityWebRequest(PluginProtocol.Root + "media.json", UnityWebRequest.kHttpVerbGET) { downloadHandler = new BoundedDownload(256 * 1024), timeout = 5, redirectLimit = 0 };
             try { galleryRequest.SendWebRequest(); }
             catch { galleryRequest.Dispose(); galleryRequest = null; }
@@ -854,20 +811,11 @@ namespace CreatorWorks.Plugins
                 {
                     try { PluginProtocol.ApplyDownloads(listings, bytes); }
                     catch { warnings++; }
-                    LoadProducts();
-                }, error => LoadProducts(), 5);
+                    FinishCatalogue();
+                }, error => FinishCatalogue(), 5);
                 return;
             }
             LoadNextListing();
-        }
-        private void LoadProducts()
-        {
-            Fetch(PluginProtocol.Root + "products.json", 128 * 1024, bytes =>
-            {
-                try { products = ProductMetadata.Parse(bytes, listings); }
-                catch { products = Array.Empty<ProductDetails>(); }
-                FinishCatalogue();
-            }, error => FinishCatalogue(), 5);
         }
         private void FinishCatalogue()
         {
@@ -1176,12 +1124,7 @@ namespace CreatorWorks.Plugins
             GUI.Label(new Rect(x, y, width, height), Author(entry), cardAuthor); y += height + 4;
             height = wrapped.CalcHeight(new GUIContent(Summary(entry.description)), width);
             GUI.Label(new Rect(x, y, width, height), Summary(entry.description), wrapped);
-            var product = Product(entry);
-            if (product != null)
-            {
-                if (GUI.Button(new Rect(x, rect.yMax - 26, width - 96, 20), "Purchase (Paid)")) ProductLink(product.purchaseUrl);
-            }
-            else using (new EditorGUI.DisabledScope(request != null || ImportReview.Busy || !PluginProtocol.CanImport(entry)))
+            using (new EditorGUI.DisabledScope(request != null || ImportReview.Busy || !PluginProtocol.CanImport(entry)))
                 if (GUI.Button(new Rect(x, rect.yMax - 26, width - 96, 20), "Import into project")) Import(entry);
             if (GUI.Button(new Rect(rect.xMax - 98, rect.yMax - 26, 92, 20), selected == entry ? "Hide details" : "Details")) selected = selected == entry ? null : entry;
         }
@@ -1199,12 +1142,7 @@ namespace CreatorWorks.Plugins
             EditorGUILayout.EndVertical();
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.BeginHorizontal();
-            var product = Product(entry);
-            if (product != null)
-            {
-                if (GUILayout.Button("Purchase (Paid)")) ProductLink(product.purchaseUrl);
-            }
-            else using (new EditorGUI.DisabledScope(request != null || ImportReview.Busy || !PluginProtocol.CanImport(entry)))
+            using (new EditorGUI.DisabledScope(request != null || ImportReview.Busy || !PluginProtocol.CanImport(entry)))
                 if (GUILayout.Button("Import into project")) Import(entry);
             if (GUILayout.Button(selected == entry ? "Hide details" : "Details", GUILayout.Width(92))) selected = selected == entry ? null : entry;
             EditorGUILayout.EndHorizontal();
@@ -1251,17 +1189,9 @@ namespace CreatorWorks.Plugins
             GUILayout.Label(selected.description, wrapped);
             GUILayout.Label(selected.reviewStatus == "listed" ? "Listed contribution" : "Review pending", EditorStyles.boldLabel);
             GUILayout.Label("Licence: " + selected.license, wrapped);
-            GUILayout.Label("Unity compatibility: " + Versions(selected.compatibility.unity), wrapped);
-            GUILayout.Label("Creator SDK compatibility: " + Versions(selected.compatibility.creatorSdk), wrapped);
-            GUILayout.Label("Banter SDK compatibility: " + Versions(selected.compatibility.banterSdk), wrapped);
-            var product = Product(selected);
-            if (product != null)
-            {
-                EditorGUILayout.HelpBox("Paid external product. Pricing and licence are supplied by the author. No package is included.", MessageType.Info);
-                if (GUILayout.Button("Product website")) ProductLink(product.websiteUrl);
-                foreach (var claim in product.claims)
-                    GUILayout.Label(claim.dimension + ": " + claim.value + " / " + (claim.evidence == "maintainer-tested" ? "Maintainer tested" : "Author reported") + ": " + claim.notes, wrapped);
-            }
+            GUILayout.Label("Unity tested: " + Versions(selected.compatibility.unity), wrapped);
+            GUILayout.Label("Creator SDK tested: " + Versions(selected.compatibility.creatorSdk), wrapped);
+            GUILayout.Label("Banter SDK tested: " + Versions(selected.compatibility.banterSdk), wrapped);
             GUILayout.Label("Dependencies: " + (selected.dependencies == null || selected.dependencies.Length == 0 ? "None declared" : string.Join(", ", selected.dependencies)), wrapped);
             GUILayout.Label(selected.usage ?? "See contributor instructions.", wrapped);
             GUILayout.Label(selected.testNotes, wrapped);
@@ -1272,7 +1202,7 @@ namespace CreatorWorks.Plugins
             if (!string.IsNullOrEmpty(selected.sourceUrl) && GUILayout.Button("Source")) Link(selected.sourceUrl);
             if (!string.IsNullOrEmpty(selected.discussionUrl) && GUILayout.Button("Discussion")) Link(selected.discussionUrl);
         }
-        private static string Versions(string[] values) => values == null || values.Length == 0 ? "Not specified" : string.Join(", ", values);
+        private static string Versions(string[] values) => values == null || values.Length == 0 ? "Not yet verified" : string.Join(", ", values);
         private void DrawInbox()
         {
             GUILayout.Label("Packages stay outside Assets until you approve files in Unity's import dialog.", wrapped);

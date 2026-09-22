@@ -310,6 +310,8 @@
     finally { busy = false; refresh.disabled = false; updateDownloads(); window.dispatchEvent(new CustomEvent('creator-community-busy', { detail: false })); }
   }
   function item(entry) {
+    const product = (snapshot.products || []).find(p => p.id === entry.id && p.version === entry.version
+      && entry.reviewStatus === 'listed' && entry.scope === 'instructions-only' && !entry.download);
     const article = el('article', 'community-item'); article.dataset.id = entry.id;
     const visual = el('div', 'community-visual'); const media = gallery(entry);
     const source = imageUrl(entry.previewImage) || imageUrl(media[0]?.poster || media[0]?.url);
@@ -323,12 +325,23 @@
     const body = el('div', 'community-item-body');
     const meta = el('div', 'community-meta'); meta.append(el('span', 'community-type', types[entry.category] || 'Contribution'));
     if (entry.includesCode) meta.append(el('span', 'community-code', 'Includes code'));
+    if (product) meta.append(el('span', 'community-code', 'Paid'));
     body.append(meta, el('h3', '', entry.name));
     body.append(el('p', 'community-author', `By ${entry.author.name}${entry.author.discord ? ` / ${entry.author.discord}` : ''}`), el('p', 'community-description', entry.description));
     const actions = el('div', 'community-item-actions');
     const details = el('details', 'community-details'); const toggle = el('summary', '', 'Details & instructions'); details.append(toggle);
     const specs = el('dl', 'community-specs');
-    const values = [['Licence', entry.license], ['Unity tested', entry.compatibility.unity.join(', ') || 'Not yet verified'], ['Creator SDK tested', entry.compatibility.creatorSdk.join(', ') || 'Not yet verified'], ['Banter SDK tested', entry.compatibility.banterSdk.join(', ') || 'Not yet verified'], ['Dependencies', entry.dependencies.join(', ') || 'None declared'], ['Package', entry.download ? `${bytes(entry.download.byteLength)} / ${entry.version}` : 'Instructions only']];
+    const values = [['Licence', entry.license], ['Unity compatibility', entry.compatibility.unity.join(', ') || 'Not specified'], ['Creator SDK compatibility', entry.compatibility.creatorSdk.join(', ') || 'Not specified'], ['Banter SDK compatibility', entry.compatibility.banterSdk.join(', ') || 'Not specified'], ['Dependencies', entry.dependencies.join(', ') || 'None declared'], ['Package', entry.download ? `${bytes(entry.download.byteLength)} / ${entry.version}` : 'Instructions only']];
+    const dimensions = { unity: 'Unity', 'creator-sdk': 'Creator SDK', 'banter-sdk': 'Banter SDK', 'render-pipeline': 'Render pipeline', 'host-os': 'Host OS', 'build-target': 'Build target', runtime: 'Runtime' };
+    if (product) {
+      actions.append(button('Purchase', 'community-primary', () => link(entry.id, 'purchase'), 'external'),
+        button('Product website', 'community-secondary', () => link(entry.id, 'product'), 'external'));
+      for (const claim of product.claims || []) values.push([
+        dimensions[claim.dimension] || claim.dimension,
+        `${claim.value} / ${claim.evidence === 'maintainer-tested' ? 'Maintainer tested' : 'Author reported'}: ${claim.notes}`
+      ]);
+      details.append(el('p', 'community-caution', 'External purchase. Current pricing and product licence are supplied by the author. No package is included in this listing.'));
+    }
     for (const [label, text] of values) { const row = el('div'); row.append(el('dt', '', label), el('dd', '', text)); specs.append(row); }
     details.append(el('p', 'community-destination', destination(entry)), el('p', 'community-usage', entry.usage || 'See the contributor instructions.'), specs, el('p', 'community-test-notes', entry.testNotes));
     details.append(el('h4', '', 'Incorporation steps'));
@@ -342,7 +355,7 @@
     details.append(links);
     if (entry.download && entry.reviewStatus === 'listed') {
       const save = button('Download package', 'community-primary', () => download(entry, save), 'download'); save.dataset.communityDownload = entry.id; save.disabled = busy || snapshot.stale; actions.append(save, el('span', 'community-size', bytes(entry.download.byteLength)));
-    } else actions.append(el('span', 'community-review', entry.download ? 'Review pending' : 'Instructions only'));
+    } else if (!product) actions.append(el('span', 'community-review', entry.download ? 'Review pending' : 'Instructions only'));
     if (snapshot?.projectImportEnabled === true && unityImport(entry)) {
       const add = button('Add to project', 'community-secondary', () => openProject(entry), 'plugins');
       add.dataset.communityImport = entry.reviewStatus;
