@@ -98,7 +98,7 @@ try {
             if (state.deferStatus) { await state.hold('status'); }
             return {runtime:{ready:true,bundled:true}, project: args.unityProjectPath ? {valid:!state.invalid,
               bridgeInstalled:true,bridgeCurrent:true,stateStatus:'fresh',sdkProfile:profile(args.unityProjectPath)} : null,
-              clients:['codex','claude','antigravity','opencode'].map(id => ({id,detected:true,configured:true}))};
+              clients:['codex','claude','claudeDesktop','antigravity','opencode'].map(id => ({id,detected:true,configured:true}))};
           case 'get_project_feedback_settings': return {enabled:false,usageCheckIns:false};
           case 'get_project_sdk_profile': return profile(args.unityProjectPath);
           case 'get_unity_extension_status': return {current:true,installed:true};
@@ -106,6 +106,7 @@ try {
           case 'update_configured_unity_extensions': await state.hold('bridges'); return {updated:3,failed:[]};
           case 'update_codex_mcp_config':
           case 'update_claude_mcp_config':
+          case 'update_claude_desktop_mcp_config':
           case 'update_antigravity_mcp_config':
           case 'update_opencode_mcp_config':
           case 'set_project_feedback_settings':

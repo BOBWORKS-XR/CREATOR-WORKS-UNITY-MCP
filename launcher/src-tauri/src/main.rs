@@ -152,6 +152,7 @@ struct SetupResult {
     bridge_installed: bool,
     codex_configured: bool,
     claude_configured: bool,
+    claude_desktop_configured: bool,
     antigravity_configured: bool,
     opencode_configured: bool,
     runtime_command: String,
@@ -980,6 +981,17 @@ fn get_claude_config_path() -> PathBuf {
         .join(".claude.json")
 }
 
+/// Get Claude Desktop config path (`claude_desktop_config.json`).
+/// `dirs::config_dir()` resolves to `~/.config` on Linux,
+/// `~/Library/Application Support` on macOS and `%APPDATA%` on Windows,
+/// which are exactly where the Claude desktop app looks for this file.
+fn get_claude_desktop_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Claude")
+        .join("claude_desktop_config.json")
+}
+
 /// Get Codex config path
 fn get_codex_config_path() -> PathBuf {
     dirs::home_dir()
@@ -1172,6 +1184,90 @@ fn remove_claude_mcp_config() -> Result<(), String> {
 
     let content = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize Claude config: {}", e))?;
+
+    atomic_write(&config_path, &content)
+}
+
+fn read_claude_desktop_config(config_path: &Path) -> Result<serde_json::Value, String> {
+    if !config_path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let content = fs::read_to_string(config_path)
+        .map_err(|e| format!("Failed to read Claude Desktop config: {}", e))?;
+    if content.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    serde_json::from_str(&content).map_err(|e| {
+        format!(
+            "Failed to parse Claude Desktop config; refusing to overwrite it: {}",
+            e
+        )
+    })
+}
+
+/// Read current Claude Desktop MCP configuration
+#[tauri::command]
+fn get_claude_desktop_mcp_config() -> Result<serde_json::Value, String> {
+    read_claude_desktop_config(&get_claude_desktop_config_path())
+}
+
+/// Update Claude Desktop MCP configuration for a channel. The desktop app
+/// uses the same `mcpServers` shape as Claude Code, so the entry is built by
+/// the shared Claude builder. The command is always the resolved absolute
+/// Node path because the desktop app does not inherit a login-shell PATH.
+#[tauri::command]
+fn update_claude_desktop_mcp_config(
+    app: tauri::AppHandle,
+    channel: ProjectChannel,
+    mcp_server_path: String,
+    tool_groups: String,
+) -> Result<(), String> {
+    let config_path = get_claude_desktop_config_path();
+    let mcp_server_path = validate_mcp_server_path(&mcp_server_path)?
+        .to_string_lossy()
+        .to_string();
+    let tool_groups = normalize_tool_groups(&tool_groups)?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create Claude Desktop config directory: {}", e))?;
+    }
+
+    let config = read_claude_desktop_config(&config_path)?;
+    let node_command = resolve_node_command(&app)?.0.to_string_lossy().to_string();
+    let config = build_claude_mcp_config(
+        config,
+        &channel,
+        &node_command,
+        &mcp_server_path,
+        &tool_groups,
+    )
+    .map_err(|e| e.replace("Claude config", "Claude Desktop config"))?;
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize Claude Desktop config: {}", e))?;
+
+    atomic_write(&config_path, &content)
+}
+
+/// Remove Creator Works MCP and its former Banter entry from Claude Desktop.
+#[tauri::command]
+fn remove_claude_desktop_mcp_config() -> Result<(), String> {
+    let config_path = get_claude_desktop_config_path();
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let mut config = read_claude_desktop_config(&config_path)?;
+
+    if let Some(servers) = config.get_mut("mcpServers") {
+        if let Some(obj) = servers.as_object_mut() {
+            obj.remove(MCP_CLIENT_ID);
+            obj.remove(LEGACY_MCP_CLIENT_ID);
+        }
+    }
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize Claude Desktop config: {}", e))?;
 
     atomic_write(&config_path, &content)
 }
@@ -1713,6 +1809,30 @@ fn claude_is_configured() -> bool {
         .is_some()
 }
 
+fn claude_desktop_is_configured() -> bool {
+    read_claude_desktop_config(&get_claude_desktop_config_path())
+        .ok()
+        .and_then(|config| {
+            let servers = config.get("mcpServers")?;
+            servers
+                .get(MCP_CLIENT_ID)
+                .or_else(|| servers.get(LEGACY_MCP_CLIENT_ID))
+                .cloned()
+        })
+        .is_some()
+}
+
+fn claude_desktop_is_installed() -> bool {
+    let config_dir_exists = get_claude_desktop_config_path()
+        .parent()
+        .map(|dir| dir.is_dir())
+        .unwrap_or(false);
+    config_dir_exists
+        || command_is_available("claude-desktop")
+        || Path::new("/usr/bin/claude-desktop").exists()
+        || Path::new("/Applications/Claude.app").exists()
+}
+
 fn antigravity_is_configured() -> bool {
     fs::read_to_string(get_antigravity_config_path())
         .ok()
@@ -1764,6 +1884,15 @@ fn client_statuses() -> Vec<ClientStatus> {
                 || command_is_available("claude"),
             configured: claude_is_configured(),
             config_path: get_claude_config_path().to_string_lossy().to_string(),
+        },
+        ClientStatus {
+            id: "claudeDesktop".to_string(),
+            name: "Claude Desktop".to_string(),
+            detected: claude_desktop_is_installed(),
+            configured: claude_desktop_is_configured(),
+            config_path: get_claude_desktop_config_path()
+                .to_string_lossy()
+                .to_string(),
         },
         ClientStatus {
             id: "antigravity".to_string(),
@@ -2026,6 +2155,7 @@ fn one_click_setup(
     unity_project_path: String,
     configure_codex: bool,
     configure_claude: bool,
+    configure_claude_desktop: Option<bool>,
     configure_antigravity: bool,
     configure_opencode: bool,
     tool_groups: String,
@@ -2035,9 +2165,13 @@ fn one_click_setup(
     let mcp_server_path = default_mcp_server_path(&app)?.to_string_lossy().to_string();
     let runtime_command = resolve_node_command(&app)?.0.to_string_lossy().to_string();
     let tool_groups = normalize_tool_groups(&tool_groups)?;
+    let configure_claude_desktop = configure_claude_desktop.unwrap_or(false);
 
     if configure_claude {
         get_claude_mcp_config()?;
+    }
+    if configure_claude_desktop {
+        get_claude_desktop_mcp_config()?;
     }
     if configure_antigravity {
         get_antigravity_mcp_config()?;
@@ -2088,6 +2222,14 @@ fn one_click_setup(
             tool_groups.clone(),
         )?;
     }
+    if configure_claude_desktop {
+        update_claude_desktop_mcp_config(
+            app.clone(),
+            channel.clone(),
+            mcp_server_path.clone(),
+            tool_groups.clone(),
+        )?;
+    }
     if configure_antigravity {
         update_antigravity_mcp_config(
             app.clone(),
@@ -2105,6 +2247,7 @@ fn one_click_setup(
         bridge_installed: true,
         codex_configured: configure_codex,
         claude_configured: configure_claude,
+        claude_desktop_configured: configure_claude_desktop,
         antigravity_configured: configure_antigravity,
         opencode_configured: configure_opencode,
         runtime_command,
@@ -2212,6 +2355,9 @@ fn main() {
                 get_claude_mcp_config,
                 update_claude_mcp_config,
                 remove_claude_mcp_config,
+                get_claude_desktop_mcp_config,
+                update_claude_desktop_mcp_config,
+                remove_claude_desktop_mcp_config,
                 update_codex_mcp_config,
                 remove_codex_mcp_config,
                 get_antigravity_mcp_config,
@@ -2733,6 +2879,51 @@ mod tests {
         assert_eq!(projects[0].name, "Valid Project");
         assert_eq!(projects[0].unity_version.as_deref(), Some("6000.3.10f1"));
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn claude_desktop_config_preserves_other_settings() {
+        let channel = ProjectChannel {
+            id: "channel-1".to_string(),
+            name: "Project".to_string(),
+            unity_project_path: "/home/user/Unity/Project".to_string(),
+            scene_path: None,
+            enabled: true,
+        };
+        let root = temporary_root();
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("claude_desktop_config.json");
+        fs::write(
+            &path,
+            r#"{"preferences":{"sidebarMode":"chat"},"mcpServers":{"other":{"command":"x"},"banter":{"command":"old"}}}"#,
+        )
+        .unwrap();
+        let config = read_claude_desktop_config(&path).unwrap();
+        let config = build_claude_mcp_config(
+            config,
+            &channel,
+            "/home/user/.local/share/bantworks-mcp/server/runtime/node",
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs",
+            "all",
+        )
+        .unwrap();
+        assert_eq!(config["preferences"]["sidebarMode"], "chat");
+        assert!(config["mcpServers"]["other"].is_object());
+        assert!(config["mcpServers"]["banter"].is_null());
+        assert_eq!(
+            config["mcpServers"][MCP_CLIENT_ID]["command"],
+            "/home/user/.local/share/bantworks-mcp/server/runtime/node"
+        );
+        assert_eq!(
+            config["mcpServers"][MCP_CLIENT_ID]["env"]["UNITY_PROJECT_PATH"],
+            "/home/user/Unity/Project"
+        );
+
+        fs::write(&path, "   ").unwrap();
+        assert_eq!(read_claude_desktop_config(&path).unwrap(), serde_json::json!({}));
+        fs::write(&path, "{ not json").unwrap();
+        assert!(read_claude_desktop_config(&path).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
