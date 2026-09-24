@@ -108,7 +108,7 @@ function fixture() {
   vm.runInContext(`
     elements.workspaceControls = fieldset;
     elements.setupBtn = {};
-    for (const name of ['connectCodex','connectClaude','connectAntigravity','connectOpenCode']) elements[name] = {checked:true};
+    for (const name of ['connectCodex','connectClaude','connectClaudeDesktop','connectAntigravity','connectOpenCode']) elements[name] = {checked:true};
     onboarding = {project:{valid:true}, runtime:{ready:true}};
     showToast = message => messages.push(message);
   `, context);

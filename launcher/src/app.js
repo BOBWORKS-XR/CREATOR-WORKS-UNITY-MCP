@@ -25,15 +25,15 @@ const elements = {};
 document.addEventListener('DOMContentLoaded', async function() {
   for (const id of [
     'workspaceControls', 'status', 'runtimeBadge', 'projectPath', 'browseProjectBtn', 'discoveredProjects',
-    'connectCodex', 'connectClaude', 'connectAntigravity', 'connectOpenCode',
-    'codexDetection', 'claudeDetection', 'antigravityDetection', 'opencodeDetection',
-    'codexState', 'claudeState', 'antigravityState', 'opencodeState',
+    'connectCodex', 'connectClaude', 'connectClaudeDesktop', 'connectAntigravity', 'connectOpenCode',
+    'codexDetection', 'claudeDetection', 'claudeDesktopDetection', 'antigravityDetection', 'opencodeDetection',
+    'codexState', 'claudeState', 'claudeDesktopState', 'antigravityState', 'opencodeState',
     'setupBtn', 'setupMessage', 'projectsList', 'emptyState', 'addProjectBtn',
     'updateBridgesBtn', 'localFeedback', 'usageCheckIns', 'feedbackStatus',
     'automaticUpdates', 'checkUpdatesBtn', 'openReleaseBtn', 'updateStatus',
     'mcpServerPath', 'toolGroups', 'autoConfig', 'customScripts', 'allowAllTests', 'applyConfigBtn',
-    'applyCodexBtn', 'applyAntigravityBtn', 'applyOpenCodeBtn',
-    'disconnectBtn', 'disconnectCodexBtn', 'disconnectAntigravityBtn', 'disconnectOpenCodeBtn',
+    'applyCodexBtn', 'applyClaudeDesktopBtn', 'applyAntigravityBtn', 'applyOpenCodeBtn',
+    'disconnectBtn', 'disconnectClaudeDesktopBtn', 'disconnectCodexBtn', 'disconnectAntigravityBtn', 'disconnectOpenCodeBtn',
     'installExtensionBtn',
     'openDocsBtn', 'githubLink'
   ]) {
@@ -122,7 +122,7 @@ async function initializeHostedPreview() {
       row.className = 'check-row pending';
       row.querySelector('strong').textContent = 'Not checked';
     }
-    for (const client of ['codex', 'claude', 'antigravity', 'opencode']) {
+    for (const client of ['codex', 'claude', 'claudeDesktop', 'antigravity', 'opencode']) {
       elements[client + 'Detection'].textContent = 'Not checked';
       elements[client + 'State'].textContent = 'Not checked';
     }
@@ -222,6 +222,7 @@ function setupEventListeners() {
 
   elements.connectCodex.addEventListener('change', updateSetupButton);
   elements.connectClaude.addEventListener('change', updateSetupButton);
+  elements.connectClaudeDesktop.addEventListener('change', updateSetupButton);
   elements.connectAntigravity.addEventListener('change', updateSetupButton);
   elements.connectOpenCode.addEventListener('change', updateSetupButton);
   onOperation(elements.setupBtn, 'click', runQuickSetup);
@@ -281,6 +282,8 @@ function setupEventListeners() {
   });
 
   onOperation(elements.applyConfigBtn, 'click', applyToClaudeCode);
+  onOperation(elements.applyClaudeDesktopBtn, 'click', applyToClaudeDesktop);
+  onOperation(elements.disconnectClaudeDesktopBtn, 'click', disconnectFromClaudeDesktop);
   onOperation(elements.applyCodexBtn, 'click', applyToCodex);
   onOperation(elements.applyAntigravityBtn, 'click', applyToAntigravity);
   onOperation(elements.applyOpenCodeBtn, 'click', applyToOpenCode);
@@ -384,8 +387,10 @@ async function refreshOnboardingStatus() {
   if (!clientSelectionInitialized) {
     const codex = getClientStatus('codex');
     const claude = getClientStatus('claude');
+    const claudeDesktop = getClientStatus('claudeDesktop');
     const antigravity = getClientStatus('antigravity');
     const opencode = getClientStatus('opencode');
+    elements.connectClaudeDesktop.checked = Boolean(claudeDesktop && (claudeDesktop.detected || claudeDesktop.configured));
     elements.connectCodex.checked = Boolean(codex && (codex.detected || codex.configured));
     elements.connectClaude.checked = Boolean(claude && (claude.detected || claude.configured));
     elements.connectAntigravity.checked = Boolean(antigravity && (antigravity.detected || antigravity.configured));
@@ -421,6 +426,7 @@ function updateSetupStatus() {
   const project = onboarding.project;
   const codex = getClientStatus('codex');
   const claude = getClientStatus('claude');
+  const claudeDesktop = getClientStatus('claudeDesktop');
   const antigravity = getClientStatus('antigravity');
   const opencode = getClientStatus('opencode');
 
@@ -456,12 +462,13 @@ function updateSetupStatus() {
   setCheck('bridge', bridgeState, bridgeText);
   updateClientStatus('codex', codex, elements.codexDetection, elements.codexState);
   updateClientStatus('claude', claude, elements.claudeDetection, elements.claudeState);
+  updateClientStatus('claudeDesktop', claudeDesktop, elements.claudeDesktopDetection, elements.claudeDesktopState);
   updateClientStatus('antigravity', antigravity, elements.antigravityDetection, elements.antigravityState);
   updateClientStatus('opencode', opencode, elements.opencodeDetection, elements.opencodeState);
 
   const connected = project?.bridgeCurrent && project.stateStatus === 'fresh';
   const configured = project?.bridgeCurrent &&
-    (codex?.configured || claude?.configured || antigravity?.configured || opencode?.configured);
+    (codex?.configured || claude?.configured || claudeDesktop?.configured || antigravity?.configured || opencode?.configured);
   if (connected) {
     setHeaderStatus('active', 'Connected');
   } else if (configured) {
@@ -499,6 +506,7 @@ function updateSetupButton() {
   const runtimeReady = Boolean(onboarding?.runtime?.ready);
   const hasClient = elements.connectCodex.checked
     || elements.connectClaude.checked
+    || elements.connectClaudeDesktop.checked
     || elements.connectAntigravity.checked
     || elements.connectOpenCode.checked;
   elements.setupBtn.disabled = operationActive || !projectValid || !runtimeReady || !hasClient;
@@ -514,6 +522,7 @@ async function runQuickSetup() {
       unityProjectPath: selectedProjectPath,
       configureCodex: elements.connectCodex.checked,
       configureClaude: elements.connectClaude.checked,
+      configureClaudeDesktop: elements.connectClaudeDesktop.checked,
       configureAntigravity: elements.connectAntigravity.checked,
       configureOpencode: elements.connectOpenCode.checked,
       toolGroups: config.tool_groups || 'core',
@@ -681,6 +690,7 @@ async function updateConfiguredClients(channel) {
   await refreshOnboardingStatus();
   const codex = getClientStatus('codex');
   const claude = getClientStatus('claude');
+  const claudeDesktop = getClientStatus('claudeDesktop');
   const antigravity = getClientStatus('antigravity');
   const opencode = getClientStatus('opencode');
   if (codex?.configured) {
@@ -688,6 +698,9 @@ async function updateConfiguredClients(channel) {
   }
   if (claude?.configured) {
     await updateClaudeConfig(channel);
+  }
+  if (claudeDesktop?.configured) {
+    await updateClaudeDesktopConfig(channel);
   }
   if (antigravity?.configured) {
     await updateAntigravityConfig(channel);
@@ -707,6 +720,14 @@ async function updateCodexConfig(channel) {
 
 async function updateClaudeConfig(channel) {
   await window.CreatorRuntime.invoke('update_claude_mcp_config', {
+    channel: channel,
+    mcpServerPath: config.mcp_server_path,
+    toolGroups: config.tool_groups || 'core'
+  });
+}
+
+async function updateClaudeDesktopConfig(channel) {
+  await window.CreatorRuntime.invoke('update_claude_desktop_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
     toolGroups: config.tool_groups || 'core'
@@ -774,6 +795,30 @@ async function disconnectFromClaude() {
     showToast('Claude Code disconnected', 'success');
   } catch (error) {
     showToast('Could not disconnect Claude Code', 'error');
+  }
+}
+
+async function applyToClaudeDesktop() {
+  const channel = getActiveChannel();
+  if (!channel) return showToast('No Unity project selected', 'error');
+  try {
+    await updateClaudeDesktopConfig(channel);
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    showToast('Applied to Claude Desktop. Fully quit and reopen the Claude app.', 'success');
+  } catch (error) {
+    showToast('Claude Desktop configuration failed: ' + String(error), 'error');
+  }
+}
+
+async function disconnectFromClaudeDesktop() {
+  try {
+    await window.CreatorRuntime.invoke('remove_claude_desktop_mcp_config');
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    showToast('Claude Desktop disconnected', 'success');
+  } catch (error) {
+    showToast('Could not disconnect Claude Desktop', 'error');
   }
 }
 
