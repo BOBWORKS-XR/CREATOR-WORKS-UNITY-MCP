@@ -2921,7 +2921,10 @@ mod tests {
         );
 
         fs::write(&path, "   ").unwrap();
-        assert_eq!(read_claude_desktop_config(&path).unwrap(), serde_json::json!({}));
+        assert_eq!(
+            read_claude_desktop_config(&path).unwrap(),
+            serde_json::json!({})
+        );
         fs::write(&path, "{ not json").unwrap();
         assert!(read_claude_desktop_config(&path).is_err());
         fs::remove_dir_all(root).unwrap();
