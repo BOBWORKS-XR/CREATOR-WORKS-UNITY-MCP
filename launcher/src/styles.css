@@ -1133,6 +1133,7 @@ h2 {
 .hosted-preview-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .hosted-preview output { flex-basis: 100%; overflow-wrap: anywhere; color: #9ba7af; }
 .hosted-preview output:empty { display: none; }
+.usage-terms-dialog, .context-help-dialog { position: fixed; inset: 0; margin: auto; }
 .usage-terms-dialog { width: min(620px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 22px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); }
 .usage-terms-dialog::backdrop { background: #000b; }
 .usage-terms-dialog h2 { font-size: 18px; }
