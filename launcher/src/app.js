@@ -40,6 +40,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     elements[id] = document.getElementById(id);
   }
 
+  await window.CreatorUsageTerms.requireAcceptance();
+  window.CreatorAiUsageNotice.initialize();
   try { await window.CreatorRuntime.ready; }
   catch (error) { showToast(String(error), 'error'); return; }
   if (window.CreatorRuntime.hosted && window.CreatorRuntime.readOnly) {

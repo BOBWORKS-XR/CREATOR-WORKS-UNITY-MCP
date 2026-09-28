@@ -1133,6 +1133,40 @@ h2 {
 .hosted-preview-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .hosted-preview output { flex-basis: 100%; overflow-wrap: anywhere; color: #9ba7af; }
 .hosted-preview output:empty { display: none; }
+.usage-terms-dialog { width: min(620px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 22px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); }
+.usage-terms-dialog::backdrop { background: #000b; }
+.usage-terms-dialog h2 { font-size: 18px; }
+.terms-version { margin-top: 5px; color: var(--text-2); font-size: 12px; }
+.usage-terms-copy { max-height: min(42dvh, 340px); overflow: auto; margin-top: 16px; padding: 12px; border: 1px solid var(--border); background: #0c1012; }
+.usage-terms-copy p + p { margin-top: 10px; }
+.usage-terms-accept { display: flex; align-items: flex-start; gap: 9px; margin-top: 16px; line-height: 1.5; }
+.usage-terms-accept input { flex: 0 0 auto; margin-top: 3px; accent-color: var(--cyan); }
+.usage-terms-error { margin-top: 10px; color: var(--red); }
+.usage-terms-dialog .btn-primary { width: 100%; margin-top: 14px; }
+.ai-usage-notice:not([hidden]) { display: flex; align-items: flex-start; gap: 14px; margin: 0 24px 14px 54px; padding: 12px 14px; border: 1px solid #806325; border-left: 3px solid var(--amber); background: #211b10; color: #f1d8a0; }
+.ai-usage-copy { flex: 1 1 auto; min-width: 0; }
+.ai-usage-copy strong { display: block; margin-bottom: 3px; color: #f5c762; }
+.ai-usage-copy p { color: #e7d5b3; font-size: 12px; line-height: 1.5; }
+.ai-usage-hide { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; align-self: center; white-space: nowrap; }
+.ai-usage-hide input, .ai-usage-confirm-dialog input { accent-color: var(--amber); }
+.ai-usage-dismiss { width: 28px; height: 28px; flex: 0 0 auto; border: 1px solid #806325; border-radius: 4px; background: transparent; color: #f1d8a0; cursor: pointer; font-size: 18px; line-height: 1; }
+.ai-usage-dismiss:hover { background: #342a17; }
+.ai-usage-confirm-dialog > form > p { margin-top: 12px; }
+.ai-usage-confirm-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ai-usage-confirm-actions .btn { margin-top: 0; }
+.ai-usage-confirm-actions .btn-primary { width: auto; }
+.context-help-open { position: fixed; right: 18px; bottom: 18px; z-index: 20; min-width: 52px; height: 44px; padding: 0 13px; border: 1px solid var(--border-strong); border-radius: 24px; background: var(--surface); color: var(--text); box-shadow: 0 5px 18px #0008; font-weight: 700; cursor: pointer; }
+.context-help-open:hover { border-color: var(--cyan); color: var(--cyan); }
+.context-help-dialog { width: min(620px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); }
+.context-help-dialog::backdrop { background: #000b; }
+.context-help-heading { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.context-help-heading p { margin-top: 3px; color: var(--text-2); font-size: 12px; }
+.context-help-content { display: grid; gap: 8px; padding: 14px 18px 18px; overflow: auto; }
+.context-help-content details { border-bottom: 1px solid var(--border); padding: 8px 0 12px; }
+.context-help-content summary { cursor: pointer; font-weight: 600; }
+.context-help-content details p { margin-top: 8px; color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.context-help-content strong { color: var(--text); }
+@media (max-width: 640px) { .ai-usage-notice:not([hidden]) { flex-wrap: wrap; margin: 0 12px 12px; } .ai-usage-copy { flex-basis: calc(100% - 42px); } .ai-usage-hide { margin-left: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
   .app-shell, .app-scrim, .app-menu, .app-drawer-title, .app-shell.expanded .app-menu, .app-shell.expanded .app-drawer-title, .brand-lockup, .header.drawer-open .brand-lockup { transition: none; transform: none; }

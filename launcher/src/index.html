@@ -51,6 +51,12 @@
       </div>
     </header>
 
+    <aside id="ai-usage-notice" class="ai-usage-notice" role="note" aria-label="AI usage notice" hidden>
+      <div class="ai-usage-copy"><strong>AI usage and token costs can vary</strong><p>Prompts and tool calls may consume tokens or incur provider charges. Usage depends on your AI client, model, prompts and settings. Creator Works MCP cannot predict, see, control or cap those charges. Check your provider's usage limits and review AI-generated actions before running them.</p></div>
+      <label class="ai-usage-hide"><input id="ai-usage-dont-show" type="checkbox">Don't show again</label>
+      <button id="ai-usage-dismiss" class="ai-usage-dismiss" type="button" aria-label="Dismiss AI usage notice" title="Dismiss notice">×</button>
+    </aside>
+
     <main class="main">
       <section id="view-mcp" aria-label="MCP connections">
       <section id="hostedPreview" class="hosted-preview" hidden aria-label="Hosted MCP preview">
@@ -264,11 +270,54 @@
     </main>
 
     <footer class="footer">
-      <p>Creator Works MCP <span id="appVersion">v2.7.4</span> <span class="footer-separator">|</span> <a href="#" id="githubLink">GitHub</a></p>
+      <p>Creator Works MCP <span id="appVersion">v2.7.5</span> <span class="footer-separator">|</span> <a href="#" id="githubLink">GitHub</a></p>
     </footer>
   </div>
 
+  <button id="context-help-open" class="context-help-open" type="button" aria-haspopup="dialog" aria-controls="context-help-dialog" title="Help and troubleshooting">Help</button>
+  <dialog id="context-help-dialog" class="context-help-dialog" aria-labelledby="context-help-title">
+    <div class="context-help-heading"><div><h2 id="context-help-title">Creator Works MCP help</h2><p>MCP connects a supported AI client to Unity tools. It is not the AI model.</p></div><button id="context-help-close" class="icon-button" type="button" aria-label="Close help" title="Close help">×</button></div>
+    <div class="context-help-content">
+      <details open><summary>Which Creator app am I using?</summary><p><strong>Creator Works MCP</strong> connects a supported AI client to Unity tools. <strong>Project Setup</strong> creates and validates Creator SDK projects. <strong>Creator Hub</strong> manages apps and projects. Creator Plugins is the community catalogue, also available in Hub and the Unity Editor window.</p></details>
+      <details><summary>Why doesn't my AI see MCP?</summary><p>Check MCP's connection/setup status, confirm your AI client supports MCP, and restart or reconnect that client after configuration changes. Claude CLI is supported; Claude Desktop is not currently supported. The AI model and its billing are supplied by your client/provider.</p></details>
+      <details><summary>Why is AI using so many tokens?</summary><p>Token use depends on the client, model, prompt, context and settings. Check provider usage/billing, avoid sending unnecessary project context, disable fast or high-cost modes where available, and try a cheaper or older model for routine MCP tasks. Complex models are not usually necessary for straightforward tool actions. MCP cannot predict or cap charges.</p></details>
+      <details><summary>What do plugin types mean?</summary><p>Visual Scripting is a graph; a prefab is a reusable object hierarchy; scripts and editor tools contain code; a scene is a larger project composition. Packages may include more than one type and have dependencies. Follow the listing's destination/version instructions, back up your project, then use the catalogue's supported import flow. MCP itself does not install community packages.</p></details>
+      <details><summary>What are Project Setup and Hub for?</summary><p>Use Project Setup for a guided, pinned Creator SDK project recipe and existing-project checks. Use Hub to manage installed Creator apps, find your projects and browse community Plugins. Unity sign-in/licensing and your AI provider account remain separate.</p></details>
+      <details><summary>How do I report a problem?</summary><p>Include this app's version, AI client name/version, the exact MCP status or error, and relevant local logs. Remove API keys, tokens, private project paths and other sensitive data before sharing. Keep project backups before AI-driven changes.</p></details>
+    </div>
+  </dialog>
+
+  <dialog id="usage-terms-dialog" class="usage-terms-dialog" aria-labelledby="usage-terms-title">
+    <div id="usage-terms-form">
+      <h2 id="usage-terms-title">Terms of use and risk acknowledgement</h2>
+      <p class="terms-version">Creator Suite Terms v2026-09-28. This acknowledgement is saved on this device.</p>
+      <div class="usage-terms-copy" tabindex="0">
+        <p>Creator Works MCP and its companion tools are provided “as is” and “as available”, without warranties, to the maximum extent permitted by applicable law.</p>
+        <p>The tools can change Unity projects, files, settings, packages and installed components. Errors or incompatibilities may cause project corruption, data loss, failed setup or builds, or other damage. Keep independent backups and review changes before relying on them.</p>
+        <p>Basic Unity knowledge is recommended. Support is not guaranteed.</p>
+        <p>AI-generated output and tool actions can be unpredictable. Token use and charges depend on your AI provider, client, model, prompts and settings. The apps' developers do not control, estimate or cap that usage. Check your provider's billing and usage limits.</p>
+        <p>To the maximum extent permitted by law, you assume the risks of using the software and release its authors, maintainers and contributors from claims arising from that use. They are not liable for project corruption, data loss, setup or build problems, indirect or consequential losses, or AI-provider usage and charges.</p>
+        <p>Nothing in this notice excludes or limits rights or liability that cannot legally be excluded or limited.</p>
+      </div>
+      <label class="usage-terms-accept"><input id="usage-terms-checkbox" type="checkbox"><span>I have read and agree to these terms, including the risk assumption and liability limitations above.</span></label>
+      <p id="usage-terms-error" class="usage-terms-error" role="alert" hidden></p>
+      <button id="usage-terms-continue" class="btn btn-primary" type="button" disabled>Accept and continue</button>
+    </div>
+  </dialog>
+  <dialog id="ai-usage-confirm-dialog" class="usage-terms-dialog ai-usage-confirm-dialog" aria-labelledby="ai-usage-confirm-title">
+    <div id="ai-usage-confirm-form">
+      <h2 id="ai-usage-confirm-title">Confirm hiding this notice</h2>
+      <p>AI results, token consumption and provider charges are variable and outside Creator Works MCP's control. The app cannot estimate or cap them.</p>
+      <label class="usage-terms-accept"><input id="ai-usage-confirm-checkbox" type="checkbox"><span>I understand and accept this AI-usage risk.</span></label>
+      <p id="ai-usage-confirm-error" class="usage-terms-error" role="alert" hidden></p>
+      <div class="ai-usage-confirm-actions"><button id="ai-usage-keep" class="btn btn-secondary" type="button">Keep notice</button><button id="ai-usage-confirm" class="btn btn-primary" type="button" disabled>Confirm and hide</button></div>
+    </div>
+  </dialog>
+
   <script src="runtime.js"></script>
+  <script src="usage-terms.js"></script>
+  <script src="ai-usage-notice.js"></script>
+  <script src="help.js"></script>
   <script src="community-adapter.js"></script>
   <script src="community.js"></script>
   <script type="module" src="updates.js"></script>
