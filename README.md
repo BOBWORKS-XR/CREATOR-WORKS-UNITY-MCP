@@ -74,6 +74,16 @@ provider-quota, and headset performance improvements have not been established.
 This release does not include render-pipeline conversion, a Creator SDK
 installer, Unity AI integration, or a player emulator.
 
+## Experimental Unity CLI Support
+
+The `experiment/unity-cli-support` branch contains an opt-in, read-only Unity
+CLI adapter for compatibility checks, filtered command discovery, exact-name
+object lookup, and open-scene inspection. It is **not enabled in the launcher
+or the released MCP**. The existing bridge remains the default, including for
+Unity 2022 projects. The first small-scene comparison matched object identities,
+but the CLI wrapper was slower and did not establish token savings.
+See [scope, setup, measurements, and merge gates](docs/unity-cli-experiment.md).
+
 ## Quick Start
 
 1. On Windows, [install Creator Hub](https://github.com/BOBWORKS-XR/CREATOR-HUB/releases/latest), then choose **Install app** or **Update app** on its MCP page. Existing MCP users do not need Project Setup. A [direct MCP installer](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases) is also available for standalone use. Linux/macOS packages remain on the separate 2.6.0 stable release track.
