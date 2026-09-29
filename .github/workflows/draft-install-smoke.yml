@@ -58,13 +58,13 @@ jobs:
             $release = $raw | ConvertFrom-Json
             if ($release.tagName -cne $tag -or [bool]$release.isDraft -ne $draft -or $release.isPrerelease) { throw "Wrong release channel for $tag." }
             $name = "Creator.Works.MCP_${expectedVersion}_x64-setup.exe"
-            $matches = @($release.assets | Where-Object { $_.name -ceq $name })
-            if ($matches.Count -ne 1 -or $matches[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$') { throw "Missing digest-verified installer for $tag." }
+            $assets = @($release.assets | Where-Object { $_.name -ceq $name })
+            if ($assets.Count -ne 1 -or $assets[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$') { throw "Missing digest-verified installer for $tag." }
             New-Item -ItemType Directory -Force -Path $folder | Out-Null
             gh release download $tag --repo $repo --pattern $name --dir $folder
             if ($LASTEXITCODE -ne 0) { throw "Could not download $tag installer." }
             $file = Join-Path $folder $name
-            if ((Hash $file) -cne $matches[0].digest.Substring(7)) { throw "Installer digest mismatch for $tag." }
+            if ((Hash $file) -cne $assets[0].digest.Substring(7)) { throw "Installer digest mismatch for $tag." }
             return $file
           }
           function Extract-Launcher([string]$installer, [string]$folder) {

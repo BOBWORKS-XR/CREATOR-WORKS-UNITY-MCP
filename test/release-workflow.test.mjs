@@ -9,6 +9,10 @@ const releaseWorkflow = fs.readFileSync(
   path.join(root, ".github", "workflows", "release.yml"),
   "utf8"
 );
+const draftSmokeWorkflow = fs.readFileSync(
+  path.join(root, ".github", "workflows", "draft-install-smoke.yml"),
+  "utf8"
+);
 const tauriConfig = fs.readFileSync(
   path.join(root, "launcher", "src-tauri", "tauri.conf.json"),
   "utf8"
@@ -24,6 +28,12 @@ test("release checksums use GitHub-normalized asset names", () => {
     /\$releaseAssetName = \$artifact\.Name\.Replace\(" ", "\."\)/
   );
   assert.match(releaseWorkflow, /"\$hash  \$releaseAssetName"/);
+});
+
+test("draft install smoke does not reuse PowerShell's automatic Matches variable", () => {
+  assert.match(draftSmokeWorkflow, /\$assets = @\(\$release\.assets/);
+  assert.doesNotMatch(draftSmokeWorkflow, /\$matches\s*=/i);
+  assert.doesNotMatch(draftSmokeWorkflow, /\$matches\[/i);
 });
 
 test("release metadata states the enforced standalone Node requirement", () => {
