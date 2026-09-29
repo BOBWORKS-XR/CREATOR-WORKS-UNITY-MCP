@@ -191,13 +191,13 @@ jobs:
           set -euo pipefail
           version=${GITHUB_REF_NAME#v}
           asset="Creator.Works.MCP_${version}_${ASSET_ARCH}.dmg"
-          release=$(gh release view "$GITHUB_REF_NAME" --json tagName,isDraft,assets)
+          release=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets)
           [[ $(jq -r '.isDraft' <<<"$release") == true ]] || { echo 'Expected a draft release' >&2; exit 1; }
           digest=$(jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .digest' <<<"$release")
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Missing DMG digest' >&2; exit 1; }
           folder="$RUNNER_TEMP/mcp-release-dmg"
           mkdir -p "$folder" "$folder/mounted"
-          gh release download "$GITHUB_REF_NAME" --pattern "$asset" --dir "$folder"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir "$folder"
           actual=$(shasum -a 256 "$folder/$asset" | awk '{print $1}')
           [[ "$actual" == "${digest#sha256:}" ]] || { echo 'DMG digest mismatch' >&2; exit 1; }
           hdiutil attach -readonly -nobrowse -mountpoint "$folder/mounted" "$folder/$asset"
@@ -263,8 +263,11 @@ jobs:
               *.exe)
                 label="Creator-Works-MCP-${VERSION}-windows-x64-setup.exe"
                 ;;
-              *.dmg)
+              *aarch64.dmg)
                 label="Creator-Works-MCP-${VERSION}-macos-arm64.dmg"
+                ;;
+              *x64.dmg)
+                label="Creator-Works-MCP-${VERSION}-macos-x64.dmg"
                 ;;
               *.AppImage)
                 label="Creator-Works-MCP-${VERSION}-linux-x86_64.AppImage"

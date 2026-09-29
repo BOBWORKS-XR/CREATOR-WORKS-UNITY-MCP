@@ -149,3 +149,49 @@ jobs:
           name: mcp-draft-install-smoke-${{ matrix.baseline }}
           path: ${{ runner.temp }}/mcp-draft-install-smoke/report.json
           if-no-files-found: error
+
+  mac-package:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            asset_arch: aarch64
+            binary_arch: arm64
+          - os: macos-15-intel
+            asset_arch: x64
+            binary_arch: x86_64
+    steps:
+      - name: Verify exact draft DMG signature and architecture
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.tag }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+          BINARY_ARCH: ${{ matrix.binary_arch }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid draft tag' >&2; exit 1; }
+          release=$(gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets)
+          [[ $(jq -r '.tagName' <<<"$release") == "$CANDIDATE_TAG" ]] || { echo 'Wrong release tag' >&2; exit 1; }
+          [[ $(jq -r '.isDraft' <<<"$release") == true && $(jq -r '.isPrerelease' <<<"$release") == false ]] || { echo 'Expected stable-channel draft' >&2; exit 1; }
+          version=${CANDIDATE_TAG#v}
+          asset="Creator.Works.MCP_${version}_${ASSET_ARCH}.dmg"
+          digest=$(jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .digest' <<<"$release")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Missing DMG digest' >&2; exit 1; }
+          folder="$RUNNER_TEMP/mcp-draft-dmg"
+          mkdir -p "$folder" "$folder/mounted"
+          gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir "$folder"
+          actual=$(shasum -a 256 "$folder/$asset" | awk '{print $1}')
+          [[ "$actual" == "${digest#sha256:}" ]] || { echo 'DMG digest mismatch' >&2; exit 1; }
+          hdiutil attach -readonly -nobrowse -mountpoint "$folder/mounted" "$folder/$asset"
+          trap 'hdiutil detach "$folder/mounted"' EXIT
+          app=$(find "$folder/mounted" -maxdepth 1 -type d -name '*.app' -print -quit)
+          [[ -n "$app" ]] || { echo 'DMG has no app bundle' >&2; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$app"
+          executable=$(plutil -extract CFBundleExecutable raw -o - "$app/Contents/Info.plist")
+          architectures=$(lipo -archs "$app/Contents/MacOS/$executable")
+          [[ " $architectures " == *" $BINARY_ARCH "* ]] || { echo "Unexpected architecture: $architectures" >&2; exit 1; }
+          printf 'Verified %s: %s, %s, code signature valid\n' "$asset" "$actual" "$architectures"
