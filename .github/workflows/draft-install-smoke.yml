@@ -1,0 +1,151 @@
+name: Draft MCP installed acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact stable-channel draft tag to test
+        required: true
+        type: string
+
+permissions:
+  # The Actions token needs write access to enumerate an unpublished draft.
+  contents: write
+
+jobs:
+  install:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        baseline: [clean, '2.7.4']
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install and verify the exact draft on disposable Windows
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.tag }}
+          BASELINE: ${{ matrix.baseline }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') { throw 'Disposable GitHub-hosted Windows required.' }
+          if ($env:CANDIDATE_TAG -cnotmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+)$') { throw 'Use an exact stable draft tag.' }
+          $version = $Matches.version
+          if ((Get-Content package.json -Raw | ConvertFrom-Json).version -cne $version) { throw 'Workflow source version differs from the draft.' }
+          $repo = 'BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP'
+          $root = Join-Path $env:RUNNER_TEMP 'mcp-draft-install-smoke'
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Creator Works MCP'
+          $configRoot = Join-Path $env:APPDATA 'creator-works-mcp'
+          $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Creator Works MCP'
+          $launcher = 'creator-works-mcp-launcher.exe'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $report = [ordered]@{ schemaVersion = 1; candidate = $env:CANDIDATE_TAG; baseline = $env:BASELINE; passed = $false; checks = @() }
+          $owned = $null
+          $unrelated = $null
+          . ./test/fixtures/owned-node.ps1
+
+          function Hash([string]$file) { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() }
+          function Get-Installer([string]$tag, [string]$expectedVersion, [bool]$draft, [string]$folder) {
+            $raw = gh release view $tag --repo $repo --json tagName,isDraft,isPrerelease,assets
+            if ($LASTEXITCODE -ne 0) { throw "Could not inspect release $tag." }
+            $release = $raw | ConvertFrom-Json
+            if ($release.tagName -cne $tag -or [bool]$release.isDraft -ne $draft -or $release.isPrerelease) { throw "Wrong release channel for $tag." }
+            $name = "Creator.Works.MCP_${expectedVersion}_x64-setup.exe"
+            $matches = @($release.assets | Where-Object { $_.name -ceq $name })
+            if ($matches.Count -ne 1 -or $matches[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$') { throw "Missing digest-verified installer for $tag." }
+            New-Item -ItemType Directory -Force -Path $folder | Out-Null
+            gh release download $tag --repo $repo --pattern $name --dir $folder
+            if ($LASTEXITCODE -ne 0) { throw "Could not download $tag installer." }
+            $file = Join-Path $folder $name
+            if ((Hash $file) -cne $matches[0].digest.Substring(7)) { throw "Installer digest mismatch for $tag." }
+            return $file
+          }
+          function Extract-Launcher([string]$installer, [string]$folder) {
+            & 7z.exe x $installer "-o$folder" $launcher '-y' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Could not extract installer launcher.' }
+            $file = Join-Path $folder $launcher
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw 'Installer launcher missing.' }
+            return $file
+          }
+          function Run-Installer([string]$file, [string]$arguments, [int]$expected) {
+            $psi = [Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $file
+            $psi.Arguments = $arguments
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $child = [Diagnostics.Process]::Start($psi)
+            try {
+              if (-not $child.WaitForExit(180000)) { throw 'Installer exceeded deadline; no process was force-closed.' }
+              if ($child.ExitCode -ne $expected) { throw "Installer exited $($child.ExitCode), expected $expected." }
+            } finally { $child.Dispose() }
+          }
+
+          try {
+            foreach ($path in @($installRoot, $configRoot, $uninstallKey)) {
+              if (Test-Path -LiteralPath $path) { throw "Runner is not clean: $path" }
+            }
+            $candidate = Get-Installer $env:CANDIDATE_TAG $version $true (Join-Path $root 'candidate')
+            $payload = Extract-Launcher $candidate (Join-Path $root 'candidate-payload')
+            $expectedHash = Hash $payload
+            $report.installerSha256 = Hash $candidate
+            $report.executableSha256 = $expectedHash
+            $report.checks += 'exact-draft-digest-and-payload'
+
+            if ($env:BASELINE -ceq '2.7.4') {
+              $baseline = Get-Installer 'v2.7.4' '2.7.4' $false (Join-Path $root 'baseline')
+              $baselinePayload = Extract-Launcher $baseline (Join-Path $root 'baseline-payload')
+              Run-Installer $baseline '/S /NS' 0
+              if ((Hash (Join-Path $installRoot $launcher)) -cne (Hash $baselinePayload)) { throw 'Baseline installation does not match its payload.' }
+              if ((Get-ItemProperty -LiteralPath $uninstallKey).DisplayVersion -cne '2.7.4') { throw 'Wrong baseline registry version.' }
+              New-Item -ItemType Directory -Force -Path $configRoot | Out-Null
+              $settings = Join-Path $configRoot 'launcher-config.json'
+              $sentinel = Join-Path $installRoot 'user-content-sentinel.txt'
+              [IO.File]::WriteAllText($settings, '{"channels":[],"ciSentinel":"preserve"}')
+              [IO.File]::WriteAllText($sentinel, 'preserve-user-content')
+              $settingsHash = Hash $settings
+              $sentinelHash = Hash $sentinel
+              $owned = Start-OwnedNode (Join-Path $installRoot 'server\runtime\node.exe')
+              $unrelated = Start-OwnedNode (Get-Command node.exe).Source
+              Run-Installer $candidate ('/S /NS /UPDATE /D=' + $installRoot) 10
+              if ((Hash (Join-Path $installRoot $launcher)) -cne (Hash $baselinePayload) -or
+                  (Hash $settings) -cne $settingsHash -or (Hash $sentinel) -cne $sentinelHash -or
+                  $owned.Process.HasExited -or $unrelated.Process.HasExited) { throw 'Busy refusal modified files or stopped a Node process.' }
+              $report.checks += 'private-runtime-busy-refusal'
+              Close-OwnedNode $owned
+              $owned = $null
+              Run-Installer $candidate ('/S /NS /UPDATE /D=' + $installRoot) 0
+              if ((Hash $settings) -cne $settingsHash -or (Hash $sentinel) -cne $sentinelHash -or $unrelated.Process.HasExited) {
+                throw 'Upgrade changed settings, user content or unrelated Node.'
+              }
+              $report.checks += 'settings-and-unrelated-process-preserved'
+            } elseif ($env:BASELINE -ceq 'clean') {
+              Run-Installer $candidate '/S /NS' 0
+            } else { throw 'Unknown baseline.' }
+
+            $installed = Join-Path $installRoot $launcher
+            if ((Hash $installed) -cne $expectedHash) { throw 'Installed launcher differs from exact draft payload.' }
+            if ((Get-ItemProperty -LiteralPath $uninstallKey).DisplayVersion -cne $version) { throw 'Installed registry version differs.' }
+            node scripts/smoke-creator-hub-info.mjs $installed $expectedHash
+            if ($LASTEXITCODE -ne 0) { throw 'Installed Hub identity smoke failed.' }
+            $report.checks += 'installed-hash-version-and-identity'
+            $report.passed = $true
+          } catch {
+            $report.error = $_.Exception.Message
+            throw
+          } finally {
+            try { Close-OwnedNode $owned } finally { Close-OwnedNode $unrelated }
+            $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $root 'report.json') -Encoding utf8
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mcp-draft-install-smoke-${{ matrix.baseline }}
+          path: ${{ runner.temp }}/mcp-draft-install-smoke/report.json
+          if-no-files-found: error
