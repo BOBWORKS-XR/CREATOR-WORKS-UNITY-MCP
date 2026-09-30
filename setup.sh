@@ -13,6 +13,7 @@
 #   ./setup.sh remove-project <index>
 #   ./setup.sh set-profile <name>
 #   ./setup.sh apply-claude
+#   ./setup.sh apply-claude-desktop
 #   ./setup.sh apply-codex
 #   ./setup.sh apply-antigravity
 #   ./setup.sh apply-opencode

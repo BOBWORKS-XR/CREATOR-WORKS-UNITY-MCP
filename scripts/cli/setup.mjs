@@ -10,6 +10,7 @@
 //   remove-project      Remove a Unity project from the launcher config
 //   set-profile <name>  Set the capability profile (all|none|core,read,author,test,banter,shadergraph)
 //   apply-claude        Apply the active project to Claude Code (~/.claude.json)
+//   apply-claude-desktop Apply the active project to the Claude desktop app (claude_desktop_config.json)
 //   apply-codex         Apply the active project to Codex (~/.codex/config.toml)
 //   install-bridge      Install the Unity editor extension into the active project
 //   config-path         Print the resolved launcher config path
@@ -21,6 +22,7 @@ import {
   addProject,
   applyToAntigravity,
   applyToClaudeCode,
+  applyToClaudeDesktop,
   applyToCodex,
   applyToOpenCode,
   buildContext,
@@ -47,6 +49,7 @@ Subcommands:
   remove-project <index>               Remove a Unity project (1-based index)
   set-profile <name>                   Set the capability profile (all|none|core,read,author,test,banter,shadergraph)
   apply-claude                         Apply to Claude Code
+  apply-claude-desktop                 Apply to the Claude desktop app
   apply-codex                          Apply to Codex
   apply-antigravity                    Apply to Antigravity
   apply-opencode                       Apply to OpenCode
@@ -118,6 +121,13 @@ async function run() {
       const result = applyToClaudeCode(context);
       console.log(`Applied to Claude Code: ${result.path}`);
       console.log(`  Project: ${result.channel.name}`);
+      return;
+    }
+    case "apply-claude-desktop": {
+      const result = applyToClaudeDesktop(context);
+      console.log(`Applied to Claude Desktop: ${result.path}`);
+      console.log(`  Project: ${result.channel.name}`);
+      console.log("  Fully quit and reopen the Claude desktop app to load the server.");
       return;
     }
     case "apply-codex": {

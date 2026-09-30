@@ -16,10 +16,12 @@ pub const COMMANDS: &[&str] = &[
     "update_configured_unity_extensions",
     "update_codex_mcp_config",
     "update_claude_mcp_config",
+    "update_claude_desktop_mcp_config",
     "update_antigravity_mcp_config",
     "update_opencode_mcp_config",
     "remove_codex_mcp_config",
     "remove_claude_mcp_config",
+    "remove_claude_desktop_mcp_config",
     "remove_antigravity_mcp_config",
     "remove_opencode_mcp_config",
     "install_unity_extension",
@@ -82,12 +84,13 @@ pub fn dispatch(app: &tauri::AppHandle, command: &str, value: Value) -> Result<V
         }
         "one_click_setup" => {
             let a = args!(value, {unity_project_path: String, configure_codex: bool, configure_claude: bool,
-                configure_antigravity: bool, configure_opencode: bool, tool_groups: String, enable_custom_scripts: bool});
+                configure_claude_desktop: Option<bool>, configure_antigravity: bool, configure_opencode: bool, tool_groups: String, enable_custom_scripts: bool});
             encoded(crate::one_click_setup(
                 app.clone(),
                 a.unity_project_path,
                 a.configure_codex,
                 a.configure_claude,
+                a.configure_claude_desktop,
                 a.configure_antigravity,
                 a.configure_opencode,
                 a.tool_groups,
@@ -116,12 +119,14 @@ pub fn dispatch(app: &tauri::AppHandle, command: &str, value: Value) -> Result<V
         }
         "update_codex_mcp_config"
         | "update_claude_mcp_config"
+        | "update_claude_desktop_mcp_config"
         | "update_antigravity_mcp_config"
         | "update_opencode_mcp_config" => {
             let a = args!(value, {channel: crate::ProjectChannel, mcp_server_path: String, tool_groups: String});
             let update = match command {
                 "update_codex_mcp_config" => crate::update_codex_mcp_config,
                 "update_claude_mcp_config" => crate::update_claude_mcp_config,
+                "update_claude_desktop_mcp_config" => crate::update_claude_desktop_mcp_config,
                 "update_antigravity_mcp_config" => crate::update_antigravity_mcp_config,
                 _ => crate::update_opencode_mcp_config,
             };
@@ -130,12 +135,14 @@ pub fn dispatch(app: &tauri::AppHandle, command: &str, value: Value) -> Result<V
         }
         "remove_codex_mcp_config"
         | "remove_claude_mcp_config"
+        | "remove_claude_desktop_mcp_config"
         | "remove_antigravity_mcp_config"
         | "remove_opencode_mcp_config" => {
             args!(value, {});
             let remove = match command {
                 "remove_codex_mcp_config" => crate::remove_codex_mcp_config,
                 "remove_claude_mcp_config" => crate::remove_claude_mcp_config,
+                "remove_claude_desktop_mcp_config" => crate::remove_claude_desktop_mcp_config,
                 "remove_antigravity_mcp_config" => crate::remove_antigravity_mcp_config,
                 _ => crate::remove_opencode_mcp_config,
             };
