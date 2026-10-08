@@ -36,6 +36,7 @@ export function detectPlatformPaths(env = process.env) {
     return {
       configRoot: appData,
       claudeConfigPath: path.join(userProfile, ".claude.json"),
+      claudeDesktopConfigPath: path.join(appData, "Claude", "claude_desktop_config.json"),
       codexConfigPath: path.join(userProfile, ".codex", "config.toml"),
       antigravityConfigPath: path.join(userProfile, ".gemini", "config", "mcp_config.json"),
       opencodeConfigPath: path.join(appData, "opencode", "opencode.jsonc"),
@@ -43,9 +44,15 @@ export function detectPlatformPaths(env = process.env) {
   }
   const xdgConfig = env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
   const home = os.homedir();
+  // Claude Desktop keeps claude_desktop_config.json under the platform's
+  // application-support directory (macOS) or XDG config directory (Linux).
+  const claudeDesktopConfigPath = process.platform === "darwin"
+    ? path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+    : path.join(xdgConfig, "Claude", "claude_desktop_config.json");
   return {
     configRoot: xdgConfig,
     claudeConfigPath: path.join(home, ".claude.json"),
+    claudeDesktopConfigPath,
     codexConfigPath: path.join(xdgConfig, "codex", "config.toml"),
     antigravityConfigPath: path.join(home, ".gemini", "config", "mcp_config.json"),
     opencodeConfigPath: path.join(xdgConfig, "opencode", "opencode.jsonc"),
@@ -362,6 +369,50 @@ export function applyToClaudeCode({ configRoot, mcpRoot, codexConfigPath, claude
   return { channel, path: claudePath };
 }
 
+/**
+ * Apply the active project to the Claude desktop app
+ * (claude_desktop_config.json). The desktop app starts MCP servers with a
+ * minimal environment, so the server is launched with the absolute path of
+ * the running Node binary instead of relying on `node` being on PATH.
+ */
+export function applyToClaudeDesktop({ configRoot, mcpRoot, claudeDesktopConfigPath, nodeCommand }) {
+  const config = loadConfig({ configRoot, mcpRoot });
+  const channel = activeChannel(config);
+  const targetPath = claudeDesktopConfigPath || detectPlatformPaths().claudeDesktopConfigPath;
+  let existing = {};
+  if (existsSync(targetPath)) {
+    const raw = readFileSync(targetPath, "utf8");
+    if (raw.trim().length > 0) {
+      try {
+        existing = JSON.parse(raw);
+      } catch (error) {
+        throw new Error(`Failed to parse ${targetPath}; refusing to overwrite it: ${error.message}`);
+      }
+    }
+  }
+  if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+    throw new Error(`${targetPath} root must be a JSON object.`);
+  }
+  if (!existing.mcpServers || typeof existing.mcpServers !== "object") {
+    existing.mcpServers = {};
+  }
+  const envVars = {
+    UNITY_PROJECT_PATH: channel.unity_project_path,
+    [TOOL_GROUPS_ENV]: normalizeToolGroups(config.tool_groups),
+  };
+  if (channel.scene_path) {
+    envVars.UNITY_SCENE_PATH = channel.scene_path;
+  }
+  delete existing.mcpServers[LEGACY_MCP_CLIENT_ID];
+  existing.mcpServers[MCP_CLIENT_ID] = {
+    command: nodeCommand || process.execPath,
+    args: [config.mcp_server_path],
+    env: envVars,
+  };
+  atomicWriteText(targetPath, `${JSON.stringify(existing, null, 2)}\n`);
+  return { channel, path: targetPath };
+}
+
 function escapeTomlString(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
@@ -527,6 +578,7 @@ export function buildContext({ mcpRoot, env = process.env } = {}) {
     configRoot: platform.configRoot,
     codexConfigPath: platform.codexConfigPath,
     claudeConfigPath: platform.claudeConfigPath,
+    claudeDesktopConfigPath: platform.claudeDesktopConfigPath,
     antigravityConfigPath: platform.antigravityConfigPath,
     opencodeConfigPath: platform.opencodeConfigPath,
   };

@@ -13,6 +13,7 @@ import test from "node:test";
 import {
   applyToAntigravity,
   applyToClaudeCode,
+  applyToClaudeDesktop,
   applyToCodex,
   applyToOpenCode,
   configPathFor,
@@ -113,6 +114,16 @@ test("cross-platform CLI writes canonical client entries and preserves unrelated
     const codexPath = path.join(root, "codex.toml");
     const antigravityPath = path.join(root, "antigravity.json");
     const opencodePath = path.join(root, "opencode.jsonc");
+    const claudeDesktopPath = path.join(root, "Claude", "claude_desktop_config.json");
+    mkdirSync(path.dirname(claudeDesktopPath), { recursive: true });
+    writeFileSync(
+      claudeDesktopPath,
+      JSON.stringify({
+        preferences: { sidebarMode: "chat" },
+        mcpServers: { banter: { command: "stale" }, other: { command: "keep" } },
+      }),
+      "utf8",
+    );
 
     writeFileSync(
       claudePath,
@@ -166,6 +177,22 @@ test("cross-platform CLI writes canonical client entries and preserves unrelated
     applyToCodex({ ...context, codexConfigPath: codexPath });
     applyToAntigravity({ ...context, antigravityConfigPath: antigravityPath });
     applyToOpenCode({ ...context, opencodeConfigPath: opencodePath });
+    applyToClaudeDesktop({
+      ...context,
+      claudeDesktopConfigPath: claudeDesktopPath,
+      nodeCommand: "/opt/node/bin/node",
+    });
+
+    const claudeDesktop = JSON.parse(readFileSync(claudeDesktopPath, "utf8"));
+    assert.equal(claudeDesktop.preferences.sidebarMode, "chat");
+    assert.equal(claudeDesktop.mcpServers.other.command, "keep");
+    assert.equal(claudeDesktop.mcpServers.banter, undefined);
+    assert.equal(claudeDesktop.mcpServers["creator-works"].command, "/opt/node/bin/node");
+    assert.equal(claudeDesktop.mcpServers["creator-works"].args[0], serverPath);
+    assert.equal(
+      claudeDesktop.mcpServers["creator-works"].env.CREATOR_WORKS_TOOL_GROUPS,
+      "read,author",
+    );
 
     const claude = JSON.parse(readFileSync(claudePath, "utf8"));
     assert.equal(claude.keep, true);
